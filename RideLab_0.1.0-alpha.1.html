@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<!--
+============================================================
+RIDELAB PERFORMANCE
+Version: 0.1.0-alpha.1
+Build date: 2026-09-07
+============================================================
+
+CHANGELOG
+0.1.0-alpha.1
+- Initial Cinelli-inspired RideLab design system
+- Dark / Bright mode with persistent preference
+- Responsive mobile-first app shell
+- Bottom navigation on mobile, rail navigation on desktop
+- Functional hash routing for Today / Train / Rides / Progress / More
+- Foundation Block week logic based on explicit plan start date
+- Initial workout, zone, fuel, learn, profile and settings views
+- iPhone/iPad safe-area support and app-like touch behavior
+- Empty state for FIT import; no fake FIT analysis in alpha.1
+
+IMPORTANT
+- Never remove existing working functionality without explicit instruction.
+- Modify, do not rebuild, when developing future versions.
+============================================================
+-->
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b0b" id="themeColorMeta" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RideLab" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>RideLab Performance · 0.1.0-alpha.1</title>
+  <style>
+    /* ==========================================================
+       01 · RIDELAB DESIGN TOKENS
+       Cinelli-inspired, but intentionally not a copy.
+       ========================================================== */
+    :root {
+      --font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --bg: #0b0b0b;
+      --surface: #151515;
+      --surface-2: #1d1d1d;
+      --surface-soft: #222220;
+      --text: #f6f4ee;
+      --muted: #a7a39a;
+      --border: rgba(255,255,255,.10);
+      --border-strong: rgba(255,255,255,.16);
+      --accent: #ff5a36;
+      --green: #a7c957;
+      --yellow: #f4d53d;
+      --danger: #ff5d5d;
+      --shadow: 0 22px 70px rgba(0,0,0,.28);
+      --radius-s: 12px;
+      --radius-m: 18px;
+      --radius-l: 26px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --nav-h: 78px;
+      --content-max: 1480px;
+    }
+    :root[data-theme="bright"] {
+      --bg: #f0eee7;
+      --surface: #fbfaf6;
+      --surface-2: #ffffff;
+      --surface-soft: #e8e5dc;
+      --text: #101010;
+      --muted: #646057;
+      --border: rgba(0,0,0,.10);
+      --border-strong: rgba(0,0,0,.16);
+      --shadow: 0 22px 70px rgba(61,52,33,.12);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    a { color: inherit; }
+    .app { min-height: 100vh; }
+
+    /* ==========================================================
+       02 · APP HEADER
+       ========================================================== */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 68px;
+      padding: calc(12px + env(safe-area-inset-top)) 18px 12px;
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(18px) saturate(145%);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .brandmark {
+      width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--accent); color: #111;
+      font-weight: 950; letter-spacing: -1px; transform: rotate(-6deg);
+    }
+    .brandtext { min-width: 0; }
+    .brandname { font-weight: 950; letter-spacing: -.045em; font-size: 1.04rem; line-height: 1; }
+    .build { margin-top: 4px; color: var(--muted); font-size: .76rem; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--surface); display: grid; place-items: center; cursor: pointer;
+      transition: transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+    .icon-btn:active { transform: scale(.96); }
+    .icon-btn svg { width: 21px; height: 21px; }
+
+    /* ==========================================================
+       03 · NAVIGATION
+       ========================================================== */
+    .sidebar { display: none; }
+    .bottom-nav {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      min-height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+      padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      border-top: 1px solid var(--border); backdrop-filter: blur(20px) saturate(140%);
+    }
+    .nav-btn {
+      min-width: 0; min-height: 54px; border: 0; background: transparent; border-radius: 14px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; color: var(--muted); cursor: pointer; font-size: .70rem; font-weight: 800;
+      letter-spacing: .02em;
+    }
+    .nav-btn svg { width: 22px; height: 22px; }
+    .nav-btn.active { color: var(--text); background: var(--surface-2); }
+    .nav-btn.active svg { color: var(--accent); }
+
+    /* ==========================================================
+       04 · CONTENT LAYOUT
+       ========================================================== */
+    main {
+      width: min(100%, var(--content-max)); margin: 0 auto;
+      padding: 22px 16px calc(var(--nav-h) + 30px + env(safe-area-inset-bottom));
+    }
+    .screen { display: none; animation: screenIn .22s ease both; }
+    .screen.active { display: block; }
+    @keyframes screenIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .eyebrow { color: var(--accent); font-size: .75rem; font-weight: 950; letter-spacing: .13em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 6px; font-size: clamp(2.45rem, 12vw, 5.8rem); line-height: .89; letter-spacing: -.065em; font-weight: 950; }
+    h2 { margin-bottom: 10px; font-size: clamp(1.6rem, 6vw, 2.6rem); line-height: 1; letter-spacing: -.045em; }
+    h3 { margin-bottom: 6px; font-size: clamp(1.08rem, 3vw, 1.35rem); letter-spacing: -.025em; }
+    p { line-height: 1.48; color: var(--muted); font-size: clamp(1rem, 2.6vw, 1.08rem); }
+    .page-head { margin: 8px 0 24px; }
+    .page-head .sub { max-width: 720px; margin: 12px 0 0; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .grid.kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card {
+      min-width: 0; overflow: hidden; position: relative;
+      border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-m);
+      padding: 18px; box-shadow: var(--shadow);
+    }
+    .card.flat { box-shadow: none; }
+    .card.hero { padding: 22px; border-radius: var(--radius-l); }
+    .card.accent { background: var(--accent); color: #111; border-color: transparent; }
+    .card.accent p, .card.accent .muted, .card.accent .label { color: rgba(17,17,17,.68); }
+    .card.green { background: var(--green); color: #111; border-color: transparent; }
+    .card.yellow { background: var(--yellow); color: #111; border-color: transparent; }
+    .card.green p, .card.yellow p { color: rgba(17,17,17,.68); }
+    .metric { font-size: clamp(2.25rem, 10vw, 4.4rem); font-weight: 950; letter-spacing: -.065em; line-height: .92; }
+    .metric-sm { font-size: clamp(1.75rem, 6vw, 2.7rem); font-weight: 950; letter-spacing: -.055em; line-height: 1; }
+    .label { margin-top: 8px; color: var(--muted); font-size: .75rem; font-weight: 900; text-transform: uppercase; letter-spacing: .1em; }
+    .muted { color: var(--muted); }
+    .stack { display: flex; flex-direction: column; gap: 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+    .wrap { flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 6px 10px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
+      color: var(--muted); font-size: .76rem; font-weight: 850; white-space: nowrap;
+    }
+    .pill.dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .btn {
+      min-height: 48px; padding: 0 16px; border-radius: 999px; border: 1px solid transparent;
+      background: var(--text); color: var(--bg); font-weight: 900; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      text-decoration: none; transition: transform .16s ease, opacity .16s ease;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn.secondary { background: transparent; color: var(--text); border-color: var(--border-strong); }
+    .btn.accent { background: var(--accent); color: #111; }
+    .btn.full { width: 100%; }
+    .section-gap { margin-top: 14px; }
+    .split-rule { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+    .status-line { height: 8px; border-radius: 99px; background: var(--surface-soft); overflow: hidden; }
+    .status-line > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+
+    /* TODAY */
+    .today-hero { display: grid; gap: 14px; }
+    .readiness-ring {
+      width: 126px; height: 126px; border-radius: 50%; display: grid; place-items: center;
+      background: conic-gradient(var(--green) 0 78%, var(--surface-soft) 78% 100%);
+      padding: 10px; flex: 0 0 auto;
+    }
+    .readiness-ring > div { width: 100%; height: 100%; border-radius: 50%; background: var(--surface); display: grid; place-items: center; text-align: center; }
+    .readiness-ring strong { display: block; font-size: 2.3rem; line-height: .9; letter-spacing: -.06em; }
+    .zone-chip { display: inline-flex; align-items: center; gap: 8px; color: #111; background: var(--yellow); border-radius: 999px; padding: 7px 11px; font-weight: 950; font-size: .78rem; }
+    .workout-title { margin: 8px 0 14px; font-size: clamp(2.35rem, 12vw, 5.3rem); letter-spacing: -.07em; line-height: .84; font-weight: 950; overflow-wrap: anywhere; }
+    .targets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .target { border-top: 1px solid rgba(17,17,17,.22); padding-top: 10px; }
+    .target strong { display: block; font-size: clamp(1.3rem, 5vw, 2rem); letter-spacing: -.04em; }
+    .target span { font-size: .72rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; opacity: .58; }
+
+    /* TABS / LISTS */
+    .segmented { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); margin-bottom: 18px; }
+    .segmented button { min-height: 42px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-weight: 900; cursor: pointer; }
+    .segmented button.active { background: var(--text); color: var(--bg); }
+    .week-strip { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; }
+    .week-dot { height: 10px; border-radius: 99px; background: var(--surface-soft); }
+    .week-dot.build { background: var(--accent); }
+    .week-dot.recovery { background: var(--green); opacity: .58; }
+    .week-dot.assess { background: var(--yellow); }
+    .day-row, .list-row {
+      display: grid; grid-template-columns: 66px minmax(0,1fr) auto; align-items: center; gap: 12px;
+      padding: 15px 0; border-top: 1px solid var(--border);
+    }
+    .day-row:first-child, .list-row:first-child { border-top: 0; }
+    .day { font-weight: 950; letter-spacing: -.02em; }
+    .day-row strong, .list-row strong { display: block; overflow-wrap: anywhere; }
+    .day-row small, .list-row small { color: var(--muted); font-size: .82rem; }
+    .zone-list { display: grid; gap: 10px; }
+    .zone-row { display: grid; grid-template-columns: 54px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .zone-badge { height: 42px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); font-weight: 950; }
+    .zone-row[data-zone="z2"] .zone-badge { background: var(--green); color: #111; }
+    .zone-row[data-zone="ss"] .zone-badge { background: var(--yellow); color: #111; }
+
+    /* CHART PLACEHOLDERS */
+    .chart-shell { min-height: 240px; border-radius: 14px; border: 1px solid var(--border); background:
+      linear-gradient(to bottom, transparent 24%, var(--border) 25%, transparent 26%, transparent 49%, var(--border) 50%, transparent 51%, transparent 74%, var(--border) 75%, transparent 76%), var(--surface-2);
+      position: relative; overflow: hidden; }
+    .chart-shell svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .chart-caption { position: absolute; left: 14px; bottom: 12px; color: var(--muted); font-size: .78rem; font-weight: 800; }
+    .bar { height: 10px; border-radius: 99px; background: var(--surface-soft); overflow: hidden; }
+    .bar span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+    .zone-bar-row { display: grid; grid-template-columns: 36px minmax(0,1fr) 48px; gap: 10px; align-items: center; }
+
+    /* MORE / FORMS */
+    .menu-link { width: 100%; min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 4px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-weight: 900; font-size: 1.06rem; text-align: left; }
+    .menu-link:first-child { border-top: 0; }
+    .form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 7px; }
+    .field label { color: var(--muted); font-size: .76rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .field input, .field select {
+      width: 100%; min-height: 50px; border-radius: 12px; border: 1px solid var(--border);
+      padding: 0 13px; background: var(--surface-2); color: var(--text); font-size: 16px; outline: none;
+    }
+    .toggle-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); }
+    .toggle-row:first-child { border-top: 0; }
+    .toggle { width: 54px; height: 32px; padding: 3px; border-radius: 99px; background: var(--surface-soft); border: 1px solid var(--border); cursor: pointer; }
+    .toggle span { display: block; width: 24px; height: 24px; border-radius: 50%; background: var(--muted); transition: transform .18s ease, background .18s ease; }
+    .toggle.on span { transform: translateX(20px); background: var(--accent); }
+    .notice { border-left: 4px solid var(--yellow); padding: 12px 14px; border-radius: 0 12px 12px 0; background: color-mix(in srgb, var(--yellow) 9%, var(--surface)); color: var(--muted); line-height: 1.45; }
+    .subview { display: none; }
+    .subview.active { display: block; }
+
+    /* ==========================================================
+       05 · TABLET / DESKTOP
+       ========================================================== */
+    @media (min-width: 700px) {
+      main { padding-left: 24px; padding-right: 24px; }
+      .grid.two { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .grid.three { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .grid.kpis { grid-template-columns: repeat(4, minmax(0,1fr)); }
+      .today-hero { grid-template-columns: minmax(0,1.55fr) minmax(280px,.8fr); }
+      .form-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .targets { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    }
+    @media (min-width: 1040px) {
+      body { padding-left: 104px; }
+      .topbar { left: 104px; padding-left: 30px; padding-right: 30px; }
+      .bottom-nav { display: none; }
+      .sidebar {
+        position: fixed; inset: 0 auto 0 0; width: 104px; z-index: 70; display: flex; flex-direction: column;
+        align-items: center; gap: 10px; padding: calc(18px + env(safe-area-inset-top)) 12px 16px;
+        background: var(--surface); border-right: 1px solid var(--border);
+      }
+      .side-mark { width: 48px; height: 48px; margin-bottom: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #111; font-weight: 950; font-size: 1.12rem; transform: rotate(-6deg); }
+      .side-btn { width: 76px; min-height: 64px; border: 0; border-radius: 16px; background: transparent; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: .68rem; font-weight: 850; }
+      .side-btn svg { width: 22px; height: 22px; }
+      .side-btn.active { background: var(--surface-2); color: var(--text); }
+      .side-btn.active svg { color: var(--accent); }
+      main { padding: 34px 34px 60px; }
+      .page-head { margin-top: 18px; }
+      .card { padding: 22px; }
+      .card.hero { padding: 28px; }
+    }
+    @media (orientation: landscape) and (max-width: 1039px) and (min-width: 640px) {
+      .today-hero { grid-template-columns: 1.25fr .75fr; }
+      main { padding-bottom: calc(var(--nav-h) + 22px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Desktop Navigation">
+    <div class="side-mark">RL</div>
+    <button class="side-btn" data-route="today" aria-label="Today"></button>
+    <button class="side-btn" data-route="train" aria-label="Train"></button>
+    <button class="side-btn" data-route="rides" aria-label="Rides"></button>
+    <button class="side-btn" data-route="progress" aria-label="Progress"></button>
+    <button class="side-btn" data-route="more" aria-label="More"></button>
+  </aside>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brandmark">RL</div>
+      <div class="brandtext">
+        <div class="brandname">RIDELAB</div>
+        <div class="build">PERFORMANCE · 0.1.0-alpha.1</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="pill dot" id="demoPill">DEMO STRUCTURE</span>
+      <button class="icon-btn" id="themeToggle" aria-label="Dark/Bright Mode umschalten"></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- TODAY ================================================= -->
+    <section id="screen-today" class="screen" data-screen="today">
+      <div class="page-head">
+        <div class="eyebrow" id="todayEyebrow">FOUNDATION · WEEK 1 / 12</div>
+        <h1>TODAY.</h1>
+        <p class="sub" id="todayDate">Montag · 07. September 2026</p>
+      </div>
+
+      <div class="today-hero">
+        <article class="card hero accent">
+          <div class="row wrap"><span class="zone-chip">Z2 · ENDURANCE</span><span class="pill" style="background:rgba(17,17,17,.09);border-color:rgba(17,17,17,.15);color:#111">FOUNDATION</span></div>
+          <div class="workout-title">75 MIN<br>BUILD THE BASE.</div>
+          <div class="targets">
+            <div class="target"><strong>180–215 W</strong><span>Power target · example</span></div>
+            <div class="target"><strong>120–138</strong><span>Heart rate · example</span></div>
+            <div class="target"><strong>80–95</strong><span>Cadence rpm</span></div>
+          </div>
+          <div class="section-gap"><button class="btn" data-jump="train">WORKOUT DETAILS →</button></div>
+        </article>
+
+        <div class="grid">
+          <article class="card hero">
+            <div class="row">
+              <div><div class="eyebrow" style="color:var(--green)">READINESS</div><h2 style="margin-top:8px">GOOD TO TRAIN</h2><p style="margin-bottom:0">Noch keine persönlichen Check-in-Daten. Der Score ist in alpha.1 nur Layout-Vorschau.</p></div>
+              <div class="readiness-ring" aria-label="Demo Readiness 78"><div><span><strong>78</strong><small class="muted">DEMO</small></span></div></div>
+            </div>
+          </article>
+          <article class="card flat">
+            <div class="eyebrow" style="color:var(--yellow)">COACH</div>
+            <h3 style="margin-top:8px">Keep the easy days easy.</h3>
+            <p style="margin-bottom:0">Z2 kontrolliert fahren, an kurzen Anstiegen früh herunterschalten und Leistungsspitzen vermeiden.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="grid two section-gap">
+        <article class="card green">
+          <div class="eyebrow" style="color:#111;opacity:.6">FUEL TODAY</div>
+          <div class="row wrap" style="align-items:flex-end;margin-top:16px">
+            <div><div class="metric-sm">50 g/h</div><div class="label">Carbohydrates · example</div></div>
+            <div><div class="metric-sm">650 ml/h</div><div class="label">Fluid · example</div></div>
+          </div>
+          <button class="btn secondary full section-gap" style="border-color:rgba(17,17,17,.25);color:#111" data-open-more="fuel">PLAN MY FUEL →</button>
+        </article>
+        <article class="card flat">
+          <div class="eyebrow">12-WEEK BLOCK</div>
+          <h3 style="margin-top:8px">Foundation progression</h3>
+          <div class="week-strip" aria-label="12 week overview">
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot recovery"></span>
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot recovery"></span>
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot assess"></span>
+          </div>
+          <p style="margin:14px 0 0">Build · Recovery · Build · Assessment. Der Plan beginnt explizit am definierten Startdatum.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- TRAIN ================================================= -->
+    <section id="screen-train" class="screen" data-screen="train">
+      <div class="page-head"><div class="eyebrow">FOUNDATION BLOCK 01</div><h1>TRAIN.</h1><p class="sub">Was du trainierst, warum du es trainierst und wie es sich anfühlen soll.</p></div>
+      <div class="segmented"><button class="active" data-train-tab="plan">PLAN</button><button data-train-tab="zones">ZONES</button></div>
+
+      <div id="train-plan" class="subview active">
+        <div class="grid two">
+          <article class="card hero">
+            <div class="row wrap"><div><div class="eyebrow">WEEK 1 / 12</div><h2 style="margin-top:8px">START CONTROLLED.</h2></div><span class="pill">BUILD WEEK</span></div>
+            <p>Die erste Woche etabliert Rhythmus und Z2-Kontrolle. Die Werte sind bis zum Athleten-Onboarding Beispielwerte.</p>
+            <div class="status-line"><span style="width:8.3%"></span></div>
+          </article>
+          <article class="card yellow">
+            <div class="eyebrow" style="color:#111;opacity:.6">THIS WEEK</div><div class="metric-sm" style="margin-top:12px">3:55 h</div><div class="label">planned · example</div>
+            <p style="margin:12px 0 0;color:rgba(17,17,17,.68)">3 rides · 3 rest days · 1 optional mobility session</p>
+          </article>
+        </div>
+        <article class="card flat section-gap">
+          <div class="day-row"><div class="day">MON</div><div><strong>REST</strong><small>Recovery + optional mobility</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">TUE</div><div><strong>ENDURANCE</strong><small>60 min · Z2 · controlled</small></div><span class="pill">Z2</span></div>
+          <div class="day-row"><div class="day">WED</div><div><strong>REST</strong><small>Easy day</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">THU</div><div><strong>CADENCE + ENDURANCE</strong><small>60 min · technique focus</small></div><span class="pill">Z2</span></div>
+          <div class="day-row"><div class="day">FRI</div><div><strong>REST</strong><small>Prepare for weekend volume</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">SAT</div><div><strong>LONG ENDURANCE</strong><small>120 min · Z2 · steady</small></div><span class="pill">LONG</span></div>
+          <div class="day-row"><div class="day">SUN</div><div><strong>RECOVERY RIDE</strong><small>35 min · very easy</small></div><span class="pill">Z1</span></div>
+        </article>
+      </div>
+
+      <div id="train-zones" class="subview">
+        <article class="notice" style="margin-bottom:14px">Die Watt- und Herzfrequenzbereiche werden ab alpha.2 aus dem Athletenprofil erzeugt. Hier siehst du die endgültige Informationsstruktur mit Beispielwerten.</article>
+        <div class="zone-list">
+          <div class="zone-row"><div class="zone-badge">Z1</div><div><strong>RECOVERY</strong><small class="muted">Very easy · active recovery</small></div><span class="pill">&lt;55%</span></div>
+          <div class="zone-row" data-zone="z2"><div class="zone-badge">Z2</div><div><strong>ENDURANCE</strong><small class="muted">Aerobic base · conversational</small></div><span class="pill">56–75%</span></div>
+          <div class="zone-row"><div class="zone-badge">Z3</div><div><strong>TEMPO</strong><small class="muted">Sustained aerobic work</small></div><span class="pill">76–87%</span></div>
+          <div class="zone-row" data-zone="ss"><div class="zone-badge">SS</div><div><strong>SWEET SPOT</strong><small class="muted">High aerobic return, controlled cost</small></div><span class="pill">88–94%</span></div>
+          <div class="zone-row"><div class="zone-badge">Z4</div><div><strong>THRESHOLD</strong><small class="muted">Near sustainable maximum</small></div><span class="pill">95–105%</span></div>
+          <div class="zone-row"><div class="zone-badge">Z5</div><div><strong>VO₂ MAX</strong><small class="muted">Short high aerobic efforts</small></div><span class="pill">106–120%</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIDES ================================================= -->
+    <section id="screen-rides" class="screen" data-screen="rides">
+      <div class="page-head"><div class="eyebrow">KAROO FIT LIBRARY</div><h1>RIDES.</h1><p class="sub">Alle Fahrten bilden gemeinsam deine persönliche Datenbasis. FIT-Parsing folgt in alpha.4.</p></div>
+      <div class="grid two">
+        <article class="card hero accent">
+          <div class="eyebrow" style="color:#111;opacity:.6">FIRST IMPORT</div><h2 style="margin-top:10px">YOUR RIDES START HERE.</h2>
+          <p>Importiere künftig deine Karoo-FIT-Dateien. RideLab wird daraus Historie, Zonen, Progression und Coaching ableiten.</p>
+          <input type="file" id="fitInput" accept=".fit" multiple hidden />
+          <button class="btn" id="importFitBtn">+ CHOOSE FIT FILE</button>
+        </article>
+        <article class="card flat">
+          <div class="eyebrow">DATA PIPELINE</div><h3 style="margin-top:8px">No black box.</h3>
+          <div class="stack split-rule">
+            <span class="pill">01 · Validate</span><span class="pill">02 · Parse</span><span class="pill">03 · Normalize</span><span class="pill">04 · Analyze</span><span class="pill">05 · Compare</span><span class="pill">06 · Coach</span>
+          </div>
+        </article>
+      </div>
+      <article class="card flat section-gap">
+        <div class="eyebrow">HISTORY</div><h2 style="margin-top:8px">NO REAL RIDES YET.</h2><p>Alpha.1 zeigt bewusst keine erfundenen Ride-Daten. Sobald der FIT-Parser integriert ist, erscheinen hier ausschließlich importierte oder klar markierte Demo-Aktivitäten.</p>
+      </article>
+    </section>
+
+    <!-- PROGRESS ============================================== -->
+    <section id="screen-progress" class="screen" data-screen="progress">
+      <div class="page-head"><div class="eyebrow">BUILD A BASELINE</div><h1>PROGRESS.</h1><p class="sub">Nicht nur FTP. RideLab wird Effizienz, Konstanz, Leistung und Belastbarkeit über deine gesamte Historie verfolgen.</p></div>
+      <div class="segmented" style="grid-template-columns:repeat(4,1fr)"><button class="active">7D</button><button>4W</button><button>12W</button><button>ALL</button></div>
+      <div class="grid kpis">
+        <article class="card"><div class="metric-sm">—</div><div class="label">Training time</div></article>
+        <article class="card"><div class="metric-sm">—</div><div class="label">Distance</div></article>
+        <article class="card"><div class="metric-sm">—</div><div class="label">Training load</div></article>
+        <article class="card"><div class="metric-sm">—</div><div class="label">Aerobic trend</div></article>
+      </div>
+      <div class="grid two section-gap">
+        <article class="card">
+          <div class="eyebrow">WEEKLY LOAD</div><h3 style="margin-top:8px">Waiting for your rides.</h3>
+          <div class="chart-shell" aria-label="Empty weekly load chart"><svg viewBox="0 0 800 260" preserveAspectRatio="none"><path d="M0,220 C100,210 130,190 220,198 S360,176 430,183 S565,152 620,168 S730,125 800,140" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" opacity=".38"/></svg><div class="chart-caption">STRUCTURE PREVIEW · NO ATHLETE DATA</div></div>
+        </article>
+        <article class="card">
+          <div class="eyebrow" style="color:var(--green)">AEROBIC EFFICIENCY</div><h3 style="margin-top:8px">Power ↔ Heart Rate</h3>
+          <p>Später werden ähnliche Fahrten verglichen: gleiche Leistung bei niedrigerem Puls oder höhere Leistung bei gleichem Puls.</p>
+          <div class="notice">Baseline verfügbar, sobald genügend vergleichbare Fahrten importiert wurden.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- MORE ================================================== -->
+    <section id="screen-more" class="screen" data-screen="more">
+      <div id="more-home" class="subview active">
+        <div class="page-head"><div class="eyebrow">KNOW MORE. RIDE BETTER.</div><h1>MORE.</h1><p class="sub">Fuel, Wissen, Athletenprofil und Systemeinstellungen.</p></div>
+        <article class="card flat">
+          <button class="menu-link" data-more="fuel"><span>FUEL</span><span>→</span></button>
+          <button class="menu-link" data-more="learn"><span>LEARN</span><span>→</span></button>
+          <button class="menu-link" data-more="profile"><span>PROFILE</span><span>→</span></button>
+          <button class="menu-link" data-more="settings"><span>SETTINGS</span><span>→</span></button>
+          <button class="menu-link" data-more="about"><span>ABOUT</span><span>→</span></button>
+        </article>
+      </div>
+
+      <div id="more-fuel" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>FUEL.</h1><p class="sub">Flexibler Calculator statt hart codierter 750-ml-Flasche.</p></div>
+        <div class="grid two">
+          <article class="card hero green">
+            <div class="eyebrow" style="color:#111;opacity:.6">RIDE FUEL CALCULATOR</div>
+            <div class="form-grid section-gap">
+              <div class="field"><label>Duration · hours</label><input id="fuelDuration" type="number" min="0.5" max="12" step="0.25" value="2.5"></div>
+              <div class="field"><label>Intensity</label><select id="fuelIntensity"><option value="easy">Easy</option><option value="endurance" selected>Endurance</option><option value="tempo">Tempo</option><option value="hard">Hard</option></select></div>
+              <div class="field"><label>Temperature °C</label><input id="fuelTemp" type="number" min="-10" max="50" value="22"></div>
+              <div class="field"><label>Bottle size ml</label><input id="fuelBottle" type="number" min="250" max="2000" step="50" value="750"></div>
+            </div>
+            <button class="btn full section-gap" id="calcFuel">CALCULATE →</button>
+          </article>
+          <article class="card hero" id="fuelResult">
+            <div class="eyebrow">FOR THIS RIDE</div><div class="grid kpis section-gap" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div><div class="metric-sm" id="fuelCarbs">150 g</div><div class="label">Carbs total</div></div>
+              <div><div class="metric-sm" id="fuelFluid">1.6 L</div><div class="label">Fluid total</div></div>
+              <div><div class="metric-sm" id="fuelSodium">1500 mg</div><div class="label">Sodium total</div></div>
+              <div><div class="metric-sm" id="fuelBottles">3</div><div class="label">Bottles</div></div>
+            </div>
+            <div class="notice section-gap">Alpha.1 verwendet bewusst konservative Beispielregeln. In späteren Builds werden Körpergewicht, Schweißrate, individuelle Verträglichkeit und Trainingsziel einbezogen.</div>
+          </article>
+        </div>
+      </div>
+
+      <div id="more-learn" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>LEARN.</h1><p class="sub">Fachbegriffe so erklären, dass du dein Training ohne Trainer verstehen kannst.</p></div>
+        <div class="grid two">
+          <article class="card"><div class="eyebrow">FTP</div><h3 style="margin-top:8px">Functional Threshold Power</h3><p>Näherungswert für die höchste längerfristig haltbare Leistung. Wichtig für Power-Zonen, aber nicht der einzige Fortschrittsindikator.</p></article>
+          <article class="card"><div class="eyebrow" style="color:var(--green)">Z2</div><h3 style="margin-top:8px">Endurance</h3><p>Kontrollierter aerober Bereich. Du solltest noch in ganzen Sätzen sprechen können. Ziel ist Umfang ohne unnötige Ermüdung.</p></article>
+          <article class="card"><div class="eyebrow" style="color:var(--yellow)">SS</div><h3 style="margin-top:8px">Sweet Spot</h3><p>Praxisorientierter Bereich zwischen hohem Tempo und Schwelle: viel Trainingsreiz bei kontrollierbarer Ermüdung.</p></article>
+          <article class="card"><div class="eyebrow">RPE</div><h3 style="margin-top:8px">Rate of Perceived Exertion</h3><p>Subjektives Belastungsgefühl. Es ergänzt Watt und Herzfrequenz um die Frage: Wie hart fühlte es sich wirklich an?</p></article>
+        </div>
+      </div>
+
+      <div id="more-profile" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>PROFILE.</h1><p class="sub">Alpha.2 macht daraus das persistente Athleten-Onboarding.</p></div>
+        <article class="card">
+          <div class="form-grid">
+            <div class="field"><label>Birth year</label><input type="number" placeholder="e.g. 1968"></div>
+            <div class="field"><label>Height cm</label><input type="number" placeholder="e.g. 190"></div>
+            <div class="field"><label>Weight kg</label><input type="number" placeholder="e.g. 90"></div>
+            <div class="field"><label>FTP W</label><input type="number" placeholder="unknown is okay"></div>
+            <div class="field"><label>Max HR</label><input type="number" placeholder="unknown is okay"></div>
+            <div class="field"><label>Days / week</label><select><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></div>
+          </div>
+          <div class="notice section-gap">Diese Felder werden in alpha.1 absichtlich noch nicht persistent gespeichert. Persistenz und Onboarding sind Scope von alpha.2.</div>
+        </article>
+      </div>
+
+      <div id="more-settings" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>SETTINGS.</h1><p class="sub">Appearance, Units, Data und Developer-Basis.</p></div>
+        <div class="grid two">
+          <article class="card flat"><div class="eyebrow">APPEARANCE</div><div class="toggle-row"><div><strong>Bright mode</strong><div class="muted">Dark/Bright preference persists.</div></div><button class="toggle" id="themeSwitch" aria-label="Bright mode"><span></span></button></div></article>
+          <article class="card flat"><div class="eyebrow">UNITS</div><div class="form-grid section-gap"><div class="field"><label>Distance</label><select><option>km</option><option>mi</option></select></div><div class="field"><label>Fluid</label><select><option>ml</option><option>oz</option></select></div></div></article>
+          <article class="card flat"><div class="eyebrow">DATA</div><p style="margin-top:10px">IndexedDB + Backup/Restore werden in alpha.2 vorbereitet und bis v0.1.0 vollständig umgesetzt.</p><button class="btn secondary" disabled style="opacity:.45;cursor:not-allowed">BACKUP · COMING LATER</button></article>
+          <article class="card flat"><div class="eyebrow">DEVELOPER</div><p style="margin-top:10px">Version 0.1.0-alpha.1 · Hash Router · Responsive Shell · localStorage Theme.</p></article>
+        </div>
+      </div>
+
+      <div id="more-about" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>ABOUT.</h1><p class="sub">Ride. Understand. Adapt. Improve.</p></div>
+        <article class="card hero accent"><div class="metric-sm">RIDELAB PERFORMANCE</div><div class="label">Version 0.1.0-alpha.1</div><p style="margin-top:18px">Italian cycling culture meets performance engineering. Alpha.1 establishes the visual and interaction system without pretending unfinished analytics are already real.</p></article>
+        <article class="card flat section-gap"><div class="eyebrow">CHANGELOG</div><div class="list-row"><div class="day">α1</div><div><strong>APP SHELL</strong><small>Theme · Routing · Responsive navigation · Core screens · Fuel calculator</small></div><span class="pill">CURRENT</span></div></article>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="Mobile Navigation">
+    <button class="nav-btn" data-route="today" aria-label="Today"></button>
+    <button class="nav-btn" data-route="train" aria-label="Train"></button>
+    <button class="nav-btn" data-route="rides" aria-label="Rides"></button>
+    <button class="nav-btn" data-route="progress" aria-label="Progress"></button>
+    <button class="nav-btn" data-route="more" aria-label="More"></button>
+  </nav>
+</div>
+<script>
+/* =============================================================
+   01 · APP CONFIG
+   ============================================================= */
+const APP = {
+  name: 'RideLab Performance',
+  version: '0.1.0-alpha.1',
+  planStartDate: '2026-09-07',
+  routes: ['today','train','rides','progress','more']
+};
+
+/* =============================================================
+   02 · ICONS
+   Inline SVG avoids an external icon dependency in alpha.1.
+   ============================================================= */
+const icons = {
+  today: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>TODAY</span>',
+  train: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M7 8v8M17 8v8M3 10v4M21 10v4"/></svg><span>TRAIN</span>',
+  rides: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="17" r="3"/><circle cx="18" cy="17" r="3"/><path d="M6 17l4-8h4l4 8M9 11h7M11 7h3"/></svg><span>RIDES</span>',
+  progress: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 18V9M10 18V5M16 18v-7M22 18V3"/></svg><span>PROGRESS</span>',
+  more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>MORE</span>',
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>'
+};
+
+document.querySelectorAll('[data-route]').forEach(btn => {
+  const r = btn.dataset.route; btn.innerHTML = icons[r];
+});
+
+/* =============================================================
+   03 · THEME ENGINE
+   Preference is saved locally. No athlete data is stored yet.
+   ============================================================= */
+function getTheme(){ return localStorage.getItem('ridelab.theme') || 'dark'; }
+function applyTheme(theme){
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('ridelab.theme', theme);
+  document.getElementById('themeToggle').innerHTML = theme === 'dark' ? icons.sun : icons.moon;
+  document.getElementById('themeSwitch').classList.toggle('on', theme === 'bright');
+  document.getElementById('themeColorMeta').setAttribute('content', theme === 'dark' ? '#0b0b0b' : '#f0eee7');
+}
+function toggleTheme(){ applyTheme(getTheme() === 'dark' ? 'bright' : 'dark'); }
+document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+document.getElementById('themeSwitch').addEventListener('click', toggleTheme);
+
+/* =============================================================
+   04 · HASH ROUTER
+   Works when the HTML is opened via file:// or hosted normally.
+   ============================================================= */
+function currentRoute(){
+  const raw = (location.hash || '#today').slice(1).split('/')[0];
+  return APP.routes.includes(raw) ? raw : 'today';
+}
+function routeTo(route){ location.hash = route; }
+function renderRoute(){
+  const route = currentRoute();
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.dataset.screen === route));
+  document.querySelectorAll('[data-route]').forEach(b => b.classList.toggle('active', b.dataset.route === route));
+  if(route !== 'more') showMore('home');
+  window.scrollTo({top:0, behavior:'instant'});
+}
+document.querySelectorAll('[data-route]').forEach(b => b.addEventListener('click', () => routeTo(b.dataset.route)));
+document.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => routeTo(b.dataset.jump)));
+window.addEventListener('hashchange', renderRoute);
+
+/* =============================================================
+   05 · TRAIN TABS
+   ============================================================= */
+document.querySelectorAll('[data-train-tab]').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('[data-train-tab]').forEach(b => b.classList.toggle('active', b === btn));
+  document.getElementById('train-plan').classList.toggle('active', btn.dataset.trainTab === 'plan');
+  document.getElementById('train-zones').classList.toggle('active', btn.dataset.trainTab === 'zones');
+}));
+
+/* =============================================================
+   06 · MORE SUBVIEWS
+   ============================================================= */
+function showMore(name){
+  document.querySelectorAll('#screen-more .subview').forEach(v => v.classList.remove('active'));
+  const target = document.getElementById('more-' + name) || document.getElementById('more-home');
+  target.classList.add('active');
+}
+document.querySelectorAll('[data-more]').forEach(b => b.addEventListener('click', () => showMore(b.dataset.more)));
+document.querySelectorAll('[data-open-more]').forEach(b => b.addEventListener('click', () => { routeTo('more'); setTimeout(() => showMore(b.dataset.openMore), 0); }));
+
+/* =============================================================
+   07 · FUEL CALCULATOR – ALPHA.1
+   Conservative example rules. Personalization follows later.
+   ============================================================= */
+function calculateFuel(){
+  const h = Math.max(.5, Number(document.getElementById('fuelDuration').value) || 1);
+  const intensity = document.getElementById('fuelIntensity').value;
+  const temp = Number(document.getElementById('fuelTemp').value) || 20;
+  const bottle = Math.max(250, Number(document.getElementById('fuelBottle').value) || 750);
+  const carbsH = {easy:30, endurance:60, tempo:75, hard:90}[intensity];
+  let fluidH = temp >= 30 ? 800 : temp >= 20 ? 650 : 550;
+  if(intensity === 'hard') fluidH += 50;
+  const sodiumH = temp >= 30 ? 750 : temp >= 20 ? 600 : 500;
+  const totalCarbs = Math.round(carbsH * h);
+  const totalFluid = Math.round(fluidH * h / 50) * 50;
+  const totalSodium = Math.round(sodiumH * h / 50) * 50;
+  const bottles = Math.ceil(totalFluid / bottle);
+  document.getElementById('fuelCarbs').textContent = totalCarbs + ' g';
+  document.getElementById('fuelFluid').textContent = (totalFluid/1000).toFixed(1) + ' L';
+  document.getElementById('fuelSodium').textContent = totalSodium + ' mg';
+  document.getElementById('fuelBottles').textContent = bottles;
+}
+document.getElementById('calcFuel').addEventListener('click', calculateFuel);
+
+/* =============================================================
+   08 · FIT IMPORT PLACEHOLDER
+   The button is functional, but parsing is explicitly alpha.4.
+   ============================================================= */
+const fitInput = document.getElementById('fitInput');
+document.getElementById('importFitBtn').addEventListener('click', () => fitInput.click());
+fitInput.addEventListener('change', () => {
+  if(!fitInput.files.length) return;
+  const names = [...fitInput.files].map(f => f.name).join(', ');
+  alert('FIT selection works. Parsing is scheduled for 0.1.0-alpha.4.\n\nSelected: ' + names);
+  fitInput.value = '';
+});
+
+/* =============================================================
+   09 · DATE / PLAN WEEK DISPLAY
+   Important: plan starts on APP.planStartDate, never 12 weeks ago.
+   ============================================================= */
+function updatePlanDate(){
+  const now = new Date();
+  const start = new Date(APP.planStartDate + 'T00:00:00');
+  const days = Math.max(0, Math.floor((now - start) / 86400000));
+  const week = Math.min(12, Math.floor(days / 7) + 1);
+  document.getElementById('todayEyebrow').textContent = `FOUNDATION · WEEK ${week} / 12`;
+  document.getElementById('todayDate').textContent = new Intl.DateTimeFormat('de-DE',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}).format(now);
+}
+
+/* =============================================================
+   10 · APP INIT
+   ============================================================= */
+applyTheme(getTheme());
+updatePlanDate();
+if(!location.hash) history.replaceState(null,'','#today');
+renderRoute();
+calculateFuel();
+</script>
+</body>
+</html>
