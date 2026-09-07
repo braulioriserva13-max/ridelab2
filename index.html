@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<!--
+============================================================
+RIDELAB PERFORMANCE
+Version: 0.1.0-alpha.5
+Build date: 2026-09-07
+============================================================
+
+CHANGELOG
+0.1.0-alpha.3
+- Added real FIT parsing using fit-file-parser 5.0.2 loaded on demand
+- Added transactional multi-file import, duplicate detection and persistent ride streams
+- Added real Ride History and Ride Detail views with data-quality indicators
+- Added power-zone distribution, simple synchronized stream visualization and sensor detection
+- Added SRAM/AXS field and shift-event detection when present in FIT data
+- Added first real Progress totals from imported rides
+- FIT parser is pinned but currently loaded from HTTPS on first import; imported rides remain local
+
+0.1.0-alpha.3
+- Added IndexedDB persistence layer with schema versioning
+- Added 5-step athlete onboarding and editable persistent profile
+- Added individual power zones from FTP and HR zones from LTHR/HRmax
+- Added athlete-aware Today targets and profile status
+- Added JSON backup / restore for alpha.2 data
+- Added clean empty/unknown states instead of invented physiology values
+
+0.1.0-alpha.1
+- Initial Cinelli-inspired RideLab design system
+- Dark / Bright mode with persistent preference
+- Responsive mobile-first app shell
+- Bottom navigation on mobile, rail navigation on desktop
+- Functional hash routing for Today / Train / Rides / Progress / More
+- Foundation Block week logic based on explicit plan start date
+- Initial workout, zone, fuel, learn, profile and settings views
+- iPhone/iPad safe-area support and app-like touch behavior
+- Empty state for FIT import; no fake FIT analysis in alpha.1
+
+IMPORTANT
+- Never remove existing working functionality without explicit instruction.
+- Modify, do not rebuild, when developing future versions.
+============================================================
+-->
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b0b" id="themeColorMeta" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RideLab" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>RideLab Performance · 0.1.0-alpha.5</title>
+  <style>
+    /* ==========================================================
+       01 · RIDELAB DESIGN TOKENS
+       Cinelli-inspired, but intentionally not a copy.
+       ========================================================== */
+    :root {
+      --font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --bg: #0b0b0b;
+      --surface: #151515;
+      --surface-2: #1d1d1d;
+      --surface-soft: #222220;
+      --text: #f6f4ee;
+      --muted: #a7a39a;
+      --border: rgba(255,255,255,.10);
+      --border-strong: rgba(255,255,255,.16);
+      --accent: #ff5a36;
+      --green: #a7c957;
+      --yellow: #f4d53d;
+      --danger: #ff5d5d;
+      --shadow: 0 22px 70px rgba(0,0,0,.28);
+      --radius-s: 12px;
+      --radius-m: 18px;
+      --radius-l: 26px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --nav-h: 78px;
+      --content-max: 1480px;
+    }
+    :root[data-theme="bright"] {
+      --bg: #f0eee7;
+      --surface: #fbfaf6;
+      --surface-2: #ffffff;
+      --surface-soft: #e8e5dc;
+      --text: #101010;
+      --muted: #646057;
+      --border: rgba(0,0,0,.10);
+      --border-strong: rgba(0,0,0,.16);
+      --shadow: 0 22px 70px rgba(61,52,33,.12);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    a { color: inherit; }
+    .app { min-height: 100vh; }
+
+    /* ==========================================================
+       02 · APP HEADER
+       ========================================================== */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 68px;
+      padding: calc(12px + env(safe-area-inset-top)) 18px 12px;
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--bg) 86%, transparent);
+      backdrop-filter: blur(18px) saturate(145%);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .brandmark {
+      width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--accent); color: #111;
+      font-weight: 950; letter-spacing: -1px; transform: rotate(-6deg);
+    }
+    .brandtext { min-width: 0; }
+    .brandname { font-weight: 950; letter-spacing: -.045em; font-size: 1.04rem; line-height: 1; }
+    .build { margin-top: 4px; color: var(--muted); font-size: .76rem; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border);
+      background: var(--surface); display: grid; place-items: center; cursor: pointer;
+      transition: transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+    .icon-btn:active { transform: scale(.96); }
+    .icon-btn svg { width: 21px; height: 21px; }
+
+    /* ==========================================================
+       03 · NAVIGATION
+       ========================================================== */
+    .sidebar { display: none; }
+    .bottom-nav {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      min-height: calc(var(--nav-h) + env(safe-area-inset-bottom));
+      padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      border-top: 1px solid var(--border); backdrop-filter: blur(20px) saturate(140%);
+    }
+    .nav-btn {
+      min-width: 0; min-height: 54px; border: 0; background: transparent; border-radius: 14px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; color: var(--muted); cursor: pointer; font-size: .70rem; font-weight: 800;
+      letter-spacing: .02em;
+    }
+    .nav-btn svg { width: 22px; height: 22px; }
+    .nav-btn.active { color: var(--text); background: var(--surface-2); }
+    .nav-btn.active svg { color: var(--accent); }
+
+    /* ==========================================================
+       04 · CONTENT LAYOUT
+       ========================================================== */
+    main {
+      width: min(100%, var(--content-max)); margin: 0 auto;
+      padding: 22px 16px calc(var(--nav-h) + 30px + env(safe-area-inset-bottom));
+    }
+    .screen { display: none; animation: screenIn .22s ease both; }
+    .screen.active { display: block; }
+    @keyframes screenIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .eyebrow { color: var(--accent); font-size: .75rem; font-weight: 950; letter-spacing: .13em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 6px; font-size: clamp(2.45rem, 12vw, 5.8rem); line-height: .89; letter-spacing: -.065em; font-weight: 950; }
+    h2 { margin-bottom: 10px; font-size: clamp(1.6rem, 6vw, 2.6rem); line-height: 1; letter-spacing: -.045em; }
+    h3 { margin-bottom: 6px; font-size: clamp(1.08rem, 3vw, 1.35rem); letter-spacing: -.025em; }
+    p { line-height: 1.48; color: var(--muted); font-size: clamp(1rem, 2.6vw, 1.08rem); }
+    .page-head { margin: 8px 0 24px; }
+    .page-head .sub { max-width: 720px; margin: 12px 0 0; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    .grid.kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card {
+      min-width: 0; overflow: hidden; position: relative;
+      border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-m);
+      padding: 18px; box-shadow: var(--shadow);
+    }
+    .card.flat { box-shadow: none; }
+    .card.hero { padding: 22px; border-radius: var(--radius-l); }
+    .card.accent { background: var(--accent); color: #111; border-color: transparent; }
+    .card.accent p, .card.accent .muted, .card.accent .label { color: rgba(17,17,17,.68); }
+    .card.green { background: var(--green); color: #111; border-color: transparent; }
+    .card.yellow { background: var(--yellow); color: #111; border-color: transparent; }
+    .card.green p, .card.yellow p { color: rgba(17,17,17,.68); }
+    .metric { font-size: clamp(2.25rem, 10vw, 4.4rem); font-weight: 950; letter-spacing: -.065em; line-height: .92; }
+    .metric-sm { font-size: clamp(1.75rem, 6vw, 2.7rem); font-weight: 950; letter-spacing: -.055em; line-height: 1; }
+    .label { margin-top: 8px; color: var(--muted); font-size: .75rem; font-weight: 900; text-transform: uppercase; letter-spacing: .1em; }
+    .muted { color: var(--muted); }
+    .stack { display: flex; flex-direction: column; gap: 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; }
+    .wrap { flex-wrap: wrap; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 6px 10px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2);
+      color: var(--muted); font-size: .76rem; font-weight: 850; white-space: nowrap;
+    }
+    .pill.dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .btn {
+      min-height: 48px; padding: 0 16px; border-radius: 999px; border: 1px solid transparent;
+      background: var(--text); color: var(--bg); font-weight: 900; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      text-decoration: none; transition: transform .16s ease, opacity .16s ease;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn.secondary { background: transparent; color: var(--text); border-color: var(--border-strong); }
+    .btn.accent { background: var(--accent); color: #111; }
+    .btn.full { width: 100%; }
+    .section-gap { margin-top: 14px; }
+    .split-rule { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+    .status-line { height: 8px; border-radius: 99px; background: var(--surface-soft); overflow: hidden; }
+    .status-line > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+
+    /* TODAY */
+    .today-hero { display: grid; gap: 14px; }
+    .readiness-ring {
+      width: 126px; height: 126px; border-radius: 50%; display: grid; place-items: center;
+      background: conic-gradient(var(--green) 0 78%, var(--surface-soft) 78% 100%);
+      padding: 10px; flex: 0 0 auto;
+    }
+    .readiness-ring > div { width: 100%; height: 100%; border-radius: 50%; background: var(--surface); display: grid; place-items: center; text-align: center; }
+    .readiness-ring strong { display: block; font-size: 2.3rem; line-height: .9; letter-spacing: -.06em; }
+    .zone-chip { display: inline-flex; align-items: center; gap: 8px; color: #111; background: var(--yellow); border-radius: 999px; padding: 7px 11px; font-weight: 950; font-size: .78rem; }
+    .workout-title { margin: 8px 0 14px; font-size: clamp(2.35rem, 12vw, 5.3rem); letter-spacing: -.07em; line-height: .84; font-weight: 950; overflow-wrap: anywhere; }
+    .targets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .target { border-top: 1px solid rgba(17,17,17,.22); padding-top: 10px; }
+    .target strong { display: block; font-size: clamp(1.3rem, 5vw, 2rem); letter-spacing: -.04em; }
+    .target span { font-size: .72rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; opacity: .58; }
+
+    /* TABS / LISTS */
+    .segmented { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); margin-bottom: 18px; }
+    .segmented button { min-height: 42px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-weight: 900; cursor: pointer; }
+    .segmented button.active { background: var(--text); color: var(--bg); }
+    .week-strip { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; }
+    .week-dot { height: 10px; border-radius: 99px; background: var(--surface-soft); }
+    .week-dot.build { background: var(--accent); }
+    .week-dot.recovery { background: var(--green); opacity: .58; }
+    .week-dot.assess { background: var(--yellow); }
+    .day-row, .list-row {
+      display: grid; grid-template-columns: 66px minmax(0,1fr) auto; align-items: center; gap: 12px;
+      padding: 15px 0; border-top: 1px solid var(--border);
+    }
+    .day-row:first-child, .list-row:first-child { border-top: 0; }
+    .day { font-weight: 950; letter-spacing: -.02em; }
+    .day-row strong, .list-row strong { display: block; overflow-wrap: anywhere; }
+    .day-row small, .list-row small { color: var(--muted); font-size: .82rem; }
+    .zone-list { display: grid; gap: 10px; }
+    .zone-row { display: grid; grid-template-columns: 54px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .zone-badge { height: 42px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); font-weight: 950; }
+    .zone-row[data-zone="z2"] .zone-badge { background: var(--green); color: #111; }
+    .zone-row[data-zone="ss"] .zone-badge { background: var(--yellow); color: #111; }
+
+    /* CHART PLACEHOLDERS */
+    .chart-shell { min-height: 240px; border-radius: 14px; border: 1px solid var(--border); background:
+      linear-gradient(to bottom, transparent 24%, var(--border) 25%, transparent 26%, transparent 49%, var(--border) 50%, transparent 51%, transparent 74%, var(--border) 75%, transparent 76%), var(--surface-2);
+      position: relative; overflow: hidden; }
+    .chart-shell svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .chart-caption { position: absolute; left: 14px; bottom: 12px; color: var(--muted); font-size: .78rem; font-weight: 800; }
+    .bar { height: 10px; border-radius: 99px; background: var(--surface-soft); overflow: hidden; }
+    .bar span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+    .zone-bar-row { display: grid; grid-template-columns: 36px minmax(0,1fr) 48px; gap: 10px; align-items: center; }
+
+    /* MORE / FORMS */
+    .menu-link { width: 100%; min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 4px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-weight: 900; font-size: 1.06rem; text-align: left; }
+    .menu-link:first-child { border-top: 0; }
+    .form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 7px; }
+    .field label { color: var(--muted); font-size: .76rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .field input, .field select {
+      width: 100%; min-height: 50px; border-radius: 12px; border: 1px solid var(--border);
+      padding: 0 13px; background: var(--surface-2); color: var(--text); font-size: 16px; outline: none;
+    }
+    .toggle-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--border); }
+    .toggle-row:first-child { border-top: 0; }
+    .toggle { width: 54px; height: 32px; padding: 3px; border-radius: 99px; background: var(--surface-soft); border: 1px solid var(--border); cursor: pointer; }
+    .toggle span { display: block; width: 24px; height: 24px; border-radius: 50%; background: var(--muted); transition: transform .18s ease, background .18s ease; }
+    .toggle.on span { transform: translateX(20px); background: var(--accent); }
+    .notice { border-left: 4px solid var(--yellow); padding: 12px 14px; border-radius: 0 12px 12px 0; background: color-mix(in srgb, var(--yellow) 9%, var(--surface)); color: var(--muted); line-height: 1.45; }
+    .subview { display: none; }
+    .subview.active { display: block; }
+
+    /* ==========================================================
+       05 · TABLET / DESKTOP
+       ========================================================== */
+    @media (min-width: 700px) {
+      main { padding-left: 24px; padding-right: 24px; }
+      .grid.two { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .grid.three { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .grid.kpis { grid-template-columns: repeat(4, minmax(0,1fr)); }
+      .today-hero { grid-template-columns: minmax(0,1.55fr) minmax(280px,.8fr); }
+      .form-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .targets { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    }
+    @media (min-width: 1040px) {
+      body { padding-left: 104px; }
+      .topbar { left: 104px; padding-left: 30px; padding-right: 30px; }
+      .bottom-nav { display: none; }
+      .sidebar {
+        position: fixed; inset: 0 auto 0 0; width: 104px; z-index: 70; display: flex; flex-direction: column;
+        align-items: center; gap: 10px; padding: calc(18px + env(safe-area-inset-top)) 12px 16px;
+        background: var(--surface); border-right: 1px solid var(--border);
+      }
+      .side-mark { width: 48px; height: 48px; margin-bottom: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #111; font-weight: 950; font-size: 1.12rem; transform: rotate(-6deg); }
+      .side-btn { width: 76px; min-height: 64px; border: 0; border-radius: 16px; background: transparent; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: .68rem; font-weight: 850; }
+      .side-btn svg { width: 22px; height: 22px; }
+      .side-btn.active { background: var(--surface-2); color: var(--text); }
+      .side-btn.active svg { color: var(--accent); }
+      main { padding: 34px 34px 60px; }
+      .page-head { margin-top: 18px; }
+      .card { padding: 22px; }
+      .card.hero { padding: 28px; }
+    }
+    @media (orientation: landscape) and (max-width: 1039px) and (min-width: 640px) {
+      .today-hero { grid-template-columns: 1.25fr .75fr; }
+      main { padding-bottom: calc(var(--nav-h) + 22px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+    }
+  
+    /* ==========================================================
+       11 · ONBOARDING + PROFILE STATUS · ALPHA.2
+       ========================================================== */
+    .modal-backdrop { position: fixed; inset: 0; z-index: 200; display: none; align-items: stretch; justify-content: center; background: color-mix(in srgb, #000 72%, transparent); backdrop-filter: blur(14px); }
+    .modal-backdrop.open { display: flex; }
+    .onboarding { width: 100%; min-height: 100dvh; background: var(--bg); overflow-y: auto; padding: calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom)); }
+    .onboarding-inner { width: min(760px,100%); margin: 0 auto; }
+    .onboarding-step { display:none; animation: fadeUp .24s ease both; }
+    .onboarding-step.active { display:block; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+    .step-progress { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:18px 0 28px; }
+    .step-progress span { height:5px; border-radius:99px; background:var(--surface-soft); }
+    .step-progress span.on { background:var(--accent); }
+    .choice-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .choice { min-height:54px; padding:13px 14px; border:1px solid var(--border); border-radius:var(--radius-s); background:var(--surface); color:var(--text); font-weight:850; text-align:left; cursor:pointer; }
+    .choice.selected { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+    .onboarding-actions { display:flex; gap:10px; justify-content:space-between; margin-top:26px; }
+    .profile-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:14px; }
+    .profile-stat { padding:14px; border:1px solid var(--border); border-radius:var(--radius-s); background:var(--surface-2); min-width:0; }
+    .profile-stat strong { display:block; font-size:clamp(1.15rem,4vw,1.55rem); overflow-wrap:anywhere; }
+    .profile-stat span { color:var(--muted); font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+    .zone-range { font-weight:950; font-size:clamp(1rem,3vw,1.25rem); text-align:right; white-space:normal; }
+    .db-badge { display:inline-flex; align-items:center; gap:7px; font-size:.76rem; font-weight:900; color:var(--green); }
+    .db-badge::before { content:''; width:8px; height:8px; border-radius:50%; background:currentColor; }
+    .hidden { display:none !important; }
+    @media (min-width:700px){ .onboarding { align-items:center; padding:48px; } .choice-grid{grid-template-columns:repeat(3,minmax(0,1fr));} .profile-summary{grid-template-columns:repeat(4,minmax(0,1fr));} }
+
+  
+    /* ==========================================================
+       09 · RIDE LIBRARY + FIT IMPORT · ALPHA.5
+       ========================================================== */
+    .import-status{margin-top:16px;display:none}.import-status.show{display:block}
+    .import-progress{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:10px}
+    .import-progress>span{display:block;height:100%;width:0;background:var(--accent);transition:width .25s ease}
+    .ride-history{display:grid;gap:10px;margin-top:18px}.ride-item{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius-m);padding:16px;text-align:left;display:grid;grid-template-columns:minmax(72px,.7fr) minmax(0,2fr) repeat(3,minmax(70px,.7fr));align-items:center;gap:14px;cursor:pointer}.ride-item:hover{border-color:var(--border-strong);transform:translateY(-1px)}.ride-item strong{font-size:clamp(1rem,2vw,1.2rem)}.ride-item small{display:block;color:var(--muted);margin-top:3px}.ride-value{font-weight:850}.ride-empty{padding:8px 0 2px}.ride-detail{display:none}.ride-detail.active{display:block}.ride-library.hidden{display:none}.quality-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.quality-item{padding:12px;border:1px solid var(--border);border-radius:var(--radius-s);min-width:0}.quality-item strong{display:block;font-size:1rem}.quality-item small{color:var(--muted)}
+    .stream-chart{width:100%;height:clamp(330px,48vw,560px);display:block;background:linear-gradient(180deg,var(--surface-2),transparent);border-radius:var(--radius-m);border:1px solid var(--border);touch-action:none;user-select:none}.stream-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px}.stream-legend{display:flex;flex-wrap:wrap;gap:8px}.legend-chip{font-size:.78rem;font-weight:850;border:1px solid var(--border);border-radius:99px;padding:8px 11px;background:transparent;color:var(--muted);cursor:pointer;min-height:38px}.legend-chip.active{color:var(--text);border-color:var(--border-strong);background:var(--surface-2)}.legend-chip[data-stream="power"].active{box-shadow:inset 0 -2px 0 var(--accent)}.legend-chip[data-stream="heartRate"].active{box-shadow:inset 0 -2px 0 var(--green)}.legend-chip[data-stream="elevation"].active{box-shadow:inset 0 -2px 0 var(--yellow)}.legend-chip[data-stream="cadence"].active{box-shadow:inset 0 -2px 0 #65b9ff}.legend-chip[data-stream="speed"].active{box-shadow:inset 0 -2px 0 #c790ff}.stream-actions{display:flex;gap:8px;flex-wrap:wrap}.stream-actions .btn{min-height:38px;padding:8px 12px}.stream-hint{margin-top:10px;color:var(--muted);font-size:.82rem;line-height:1.45}.stream-inspector{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:12px}.stream-inspector .quality-item{background:var(--surface-2)}.stream-inspector .quality-item.off{opacity:.4}.zone-bar-row{display:grid;grid-template-columns:48px minmax(0,1fr) 64px;gap:10px;align-items:center;margin:10px 0}.zone-bar{height:12px;background:var(--surface-2);border-radius:99px;overflow:hidden}.zone-bar span{display:block;height:100%;background:var(--accent);border-radius:inherit}.axs-field-list{display:flex;flex-wrap:wrap;gap:7px}.axs-field-list .pill{white-space:normal}.sensor-strip{display:flex;flex-wrap:wrap;gap:8px}.sensor-ok{border-color:rgba(167,201,87,.5)}.sensor-miss{opacity:.55}.history-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+    @media(max-width:760px){.ride-item{grid-template-columns:74px minmax(0,1fr) auto}.ride-item .ride-hide-mobile{display:none}.quality-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stream-chart{height:430px}.stream-inspector{grid-template-columns:repeat(2,minmax(0,1fr))}.stream-actions{width:100%}.stream-actions .btn{flex:1}.legend-chip{font-size:.74rem;padding:8px 9px}}
+    @media(orientation:landscape) and (max-height:600px){.stream-chart{height:360px}}
+
+  
+/* ALPHA.5 · Advanced ride analytics */
+#rideAdvancedKpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));}
+.dist-block{display:grid;gap:8px;margin-bottom:20px}.dist-block:last-child{margin-bottom:0}.dist-block>.zone-bar-row{grid-template-columns:minmax(108px,1.2fr) minmax(90px,2fr) 46px;font-size:.84rem}.insight-item{padding:14px 0;border-bottom:1px solid var(--border)}.insight-item:last-child{border-bottom:0}.insight-item strong{display:block;font-size:1rem;letter-spacing:.02em}.insight-item p{margin:6px 0 0}.insight-item.good strong{color:var(--green)}.insight-item.warn strong{color:var(--yellow)}@media(max-width:599px){#rideAdvancedKpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dist-block>.zone-bar-row{grid-template-columns:94px minmax(70px,1fr) 40px}.dist-block>.zone-bar-row>span:first-child{font-size:.74rem;overflow-wrap:anywhere}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Desktop Navigation">
+    <div class="side-mark">RL</div>
+    <button class="side-btn" data-route="today" aria-label="Today"></button>
+    <button class="side-btn" data-route="train" aria-label="Train"></button>
+    <button class="side-btn" data-route="rides" aria-label="Rides"></button>
+    <button class="side-btn" data-route="progress" aria-label="Progress"></button>
+    <button class="side-btn" data-route="more" aria-label="More"></button>
+  </aside>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brandmark">RL</div>
+      <div class="brandtext">
+        <div class="brandname">RIDELAB</div>
+        <div class="build">PERFORMANCE · <span data-app-version></span></div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="pill dot" id="demoPill">DEMO STRUCTURE</span>
+      <button class="icon-btn" id="themeToggle" aria-label="Dark/Bright Mode umschalten"></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- TODAY ================================================= -->
+    <section id="screen-today" class="screen" data-screen="today">
+      <div class="page-head">
+        <div class="eyebrow" id="todayEyebrow">FOUNDATION · WEEK 1 / 12</div>
+        <h1>TODAY.</h1>
+        <p class="sub" id="todayDate">Montag · 07. September 2026</p>
+      </div>
+
+      <div class="today-hero">
+        <article class="card hero accent">
+          <div class="row wrap"><span class="zone-chip">Z2 · ENDURANCE</span><span class="pill" style="background:rgba(17,17,17,.09);border-color:rgba(17,17,17,.15);color:#111">FOUNDATION</span></div>
+          <div class="workout-title">75 MIN<br>BUILD THE BASE.</div>
+          <div class="targets">
+            <div class="target"><strong id="todayPowerTarget">SET FTP</strong><span id="todayPowerLabel">Power target</span></div>
+            <div class="target"><strong id="todayHrTarget">SET HR</strong><span id="todayHrLabel">Heart rate</span></div>
+            <div class="target"><strong>80–95</strong><span>Cadence rpm</span></div>
+          </div>
+          <div class="section-gap"><button class="btn" data-jump="train">WORKOUT DETAILS →</button></div>
+        </article>
+
+        <div class="grid">
+          <article class="card hero">
+            <div class="row">
+              <div><div class="eyebrow" style="color:var(--green)">ATHLETE STATUS</div><h2 style="margin-top:8px" id="athleteStatusTitle">SET UP PROFILE</h2><p style="margin-bottom:0" id="athleteStatusText">Persönliche Trainingswerte werden nach dem Onboarding aus deinem Profil berechnet.</p></div>
+              <div class="readiness-ring" aria-label="Profile status"><div><span><strong id="profileCompleteness">0</strong><small class="muted">PROFILE %</small></span></div></div>
+            </div>
+          </article>
+          <article class="card flat">
+            <div class="eyebrow" style="color:var(--yellow)">COACH</div>
+            <h3 style="margin-top:8px">Keep the easy days easy.</h3>
+            <p style="margin-bottom:0">Z2 kontrolliert fahren, an kurzen Anstiegen früh herunterschalten und Leistungsspitzen vermeiden.</p>
+          </article>
+        </div>
+      </div>
+
+      <div class="grid two section-gap">
+        <article class="card green">
+          <div class="eyebrow" style="color:#111;opacity:.6">FUEL TODAY</div>
+          <div class="row wrap" style="align-items:flex-end;margin-top:16px">
+            <div><div class="metric-sm">50 g/h</div><div class="label">Carbohydrates · example</div></div>
+            <div><div class="metric-sm">650 ml/h</div><div class="label">Fluid · example</div></div>
+          </div>
+          <button class="btn secondary full section-gap" style="border-color:rgba(17,17,17,.25);color:#111" data-open-more="fuel">PLAN MY FUEL →</button>
+        </article>
+        <article class="card flat">
+          <div class="eyebrow">12-WEEK BLOCK</div>
+          <h3 style="margin-top:8px">Foundation progression</h3>
+          <div class="week-strip" aria-label="12 week overview">
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot recovery"></span>
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot recovery"></span>
+            <span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot build"></span><span class="week-dot assess"></span>
+          </div>
+          <p style="margin:14px 0 0">Build · Recovery · Build · Assessment. Der Plan beginnt explizit am definierten Startdatum.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- TRAIN ================================================= -->
+    <section id="screen-train" class="screen" data-screen="train">
+      <div class="page-head"><div class="eyebrow">FOUNDATION BLOCK 01</div><h1>TRAIN.</h1><p class="sub">Was du trainierst, warum du es trainierst und wie es sich anfühlen soll.</p></div>
+      <div class="segmented"><button class="active" data-train-tab="plan">PLAN</button><button data-train-tab="zones">ZONES</button></div>
+
+      <div id="train-plan" class="subview active">
+        <div class="grid two">
+          <article class="card hero">
+            <div class="row wrap"><div><div class="eyebrow">WEEK 1 / 12</div><h2 style="margin-top:8px">START CONTROLLED.</h2></div><span class="pill">BUILD WEEK</span></div>
+            <p>Die erste Woche etabliert Rhythmus und Z2-Kontrolle. Die Werte sind bis zum Athleten-Onboarding Beispielwerte.</p>
+            <div class="status-line"><span style="width:8.3%"></span></div>
+          </article>
+          <article class="card yellow">
+            <div class="eyebrow" style="color:#111;opacity:.6">THIS WEEK</div><div class="metric-sm" style="margin-top:12px">3:55 h</div><div class="label">planned · example</div>
+            <p style="margin:12px 0 0;color:rgba(17,17,17,.68)">3 rides · 3 rest days · 1 optional mobility session</p>
+          </article>
+        </div>
+        <article class="card flat section-gap">
+          <div class="day-row"><div class="day">MON</div><div><strong>REST</strong><small>Recovery + optional mobility</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">TUE</div><div><strong>ENDURANCE</strong><small>60 min · Z2 · controlled</small></div><span class="pill">Z2</span></div>
+          <div class="day-row"><div class="day">WED</div><div><strong>REST</strong><small>Easy day</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">THU</div><div><strong>CADENCE + ENDURANCE</strong><small>60 min · technique focus</small></div><span class="pill">Z2</span></div>
+          <div class="day-row"><div class="day">FRI</div><div><strong>REST</strong><small>Prepare for weekend volume</small></div><span class="pill">REST</span></div>
+          <div class="day-row"><div class="day">SAT</div><div><strong>LONG ENDURANCE</strong><small>120 min · Z2 · steady</small></div><span class="pill">LONG</span></div>
+          <div class="day-row"><div class="day">SUN</div><div><strong>RECOVERY RIDE</strong><small>35 min · very easy</small></div><span class="pill">Z1</span></div>
+        </article>
+      </div>
+
+      <div id="train-zones" class="subview">
+        <article class="notice" id="zoneNotice" style="margin-bottom:14px">Deine Zonen werden aus dem Athletenprofil berechnet. Ohne FTP oder Herzfrequenz-Schwelle erfindet RideLab keine Werte.</article>
+        <div class="segmented" style="margin-bottom:14px"><button class="active" data-zone-tab="power">POWER</button><button data-zone-tab="hr">HEART RATE</button></div>
+        <div class="zone-list" id="powerZoneList"></div>
+        <div class="zone-list hidden" id="hrZoneList"></div>
+      </div>
+    </section>
+
+    <!-- RIDES ================================================= -->
+    <section id="screen-rides" class="screen" data-screen="rides">
+      <div class="ride-library" id="rideLibraryView">
+        <div class="page-head"><div class="eyebrow">KAROO FIT LIBRARY</div><h1>RIDES.</h1><p class="sub">Jede importierte FIT-Datei erweitert deine persönliche Trainingshistorie. Echte Daten statt Demo-Kennzahlen.</p></div>
+        <div class="grid two">
+          <article class="card hero accent">
+            <div class="eyebrow" style="color:#111;opacity:.6">FIT IMPORT · ALPHA.5</div><h2 style="margin-top:10px">ADD KAROO RIDES.</h2>
+            <p>Importiere eine oder mehrere .FIT-Dateien. RideLab validiert, normalisiert und speichert sie lokal in IndexedDB.</p>
+            <input type="file" id="fitInput" accept=".fit,application/octet-stream" multiple hidden />
+            <button class="btn" id="importFitBtn">+ CHOOSE FIT FILE</button>
+            <div class="import-status" id="importStatus"><strong id="importStatusTitle">READING RIDE</strong><small id="importStatusText">Preparing parser…</small><div class="import-progress"><span id="importProgressBar"></span></div></div>
+          </article>
+          <article class="card flat">
+            <div class="eyebrow">DATA PIPELINE</div><h3 style="margin-top:8px">No black box.</h3>
+            <div class="stack split-rule">
+              <span class="pill">01 · Validate</span><span class="pill">02 · Parse</span><span class="pill">03 · Normalize</span><span class="pill">04 · Analyze</span><span class="pill">05 · Store</span><span class="pill">06 · Compare</span>
+            </div>
+            <div class="notice section-gap">FIT parser v5.0.2 is loaded from a pinned HTTPS module on first import. The ride data itself remains stored locally in RideLab.</div>
+          </article>
+        </div>
+        <article class="card flat section-gap">
+          <div class="row wrap"><div><div class="eyebrow">HISTORY</div><h2 id="rideHistoryHeadline" style="margin-top:8px">BUILDING YOUR BASELINE.</h2></div><span class="pill" id="rideCountPill">0 RIDES</span></div>
+          <div id="rideHistory" class="ride-history"><div class="ride-empty"><p>No real rides imported yet.</p></div></div>
+        </article>
+      </div>
+
+      <div class="ride-detail" id="rideDetailView">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" id="backToRidesBtn">← RIDES</button></div><h1 id="rideDetailTitle">RIDE.</h1><p class="sub" id="rideDetailSubtitle"></p></div>
+        <div class="grid kpis" id="rideHeroKpis"></div>
+        <div class="grid two section-gap">
+          <article class="card"><div class="eyebrow">DATA QUALITY</div><div class="quality-grid section-gap" id="rideQuality"></div></article>
+          <article class="card"><div class="eyebrow">SENSORS</div><div class="sensor-strip section-gap" id="rideSensors"></div></article>
+        </div>
+        <article class="card section-gap"><div class="eyebrow">RIDE STREAM</div><h3 style="margin-top:8px">Synchronized ride signals</h3><p class="sub" style="margin-top:6px">Each signal keeps its own axis and unit. Toggle streams, inspect any point and zoom the same time window across every active panel.</p><svg class="stream-chart section-gap" id="rideStreamChart" viewBox="0 0 1000 520" preserveAspectRatio="none" aria-label="Interactive ride stream chart"></svg><div class="stream-toolbar"><div class="stream-legend" id="streamLegend"><button class="legend-chip active" data-stream="power">POWER · W</button><button class="legend-chip active" data-stream="heartRate">HEART RATE · bpm</button><button class="legend-chip active" data-stream="elevation">ELEVATION · m</button><button class="legend-chip" data-stream="cadence">CADENCE · rpm</button><button class="legend-chip" data-stream="speed">SPEED · km/h</button></div><div class="stream-actions"><button class="btn secondary" id="streamZoomOut">− ZOOM</button><button class="btn secondary" id="streamResetZoom">RESET</button></div></div><div class="stream-inspector" id="streamInspector"></div><div class="stream-hint">Desktop: mouse wheel to zoom, drag to pan. iPhone/iPad: pinch to zoom, drag with one finger to pan, tap to inspect. Double-tap resets the view.</div></article>
+        <article class="card section-gap" id="rideAdvancedAnalyticsCard">
+          <div class="row wrap"><div><div class="eyebrow">ADVANCED RIDE ANALYTICS</div><h3 style="margin-top:8px">Load, intensity & efficiency</h3></div><span class="pill" id="analyticsConfidencePill">DATA BASED</span></div>
+          <div class="grid kpis section-gap" id="rideAdvancedKpis"></div>
+          <div class="notice section-gap" id="rideAdvancedNote">Metrics are calculated from the imported FIT stream. FTP-dependent values appear only when a valid FTP is stored in the athlete profile.</div>
+        </article>
+        <div class="grid two section-gap">
+          <article class="card"><div class="eyebrow">DISTRIBUTIONS</div><h3 style="margin-top:8px">Power · Heart rate · Cadence</h3><div id="rideDistributions" class="section-gap"></div></article>
+          <article class="card"><div class="eyebrow" style="color:var(--green)">RIDE INSIGHTS</div><h3 style="margin-top:8px">What matters from this ride</h3><div id="rideInsights" class="section-gap"></div></article>
+        </div>
+        <div class="grid two section-gap">
+          <article class="card"><div class="eyebrow">POWER ZONES</div><div id="rideZoneDistribution" class="section-gap"></div></article>
+          <article class="card" id="rideAxsCard"><div class="eyebrow" style="color:var(--green)">DRIVETRAIN · SRAM / AXS</div><h3 id="rideAxsTitle" style="margin-top:8px">NO SHIFT DATA DETECTED.</h3><div id="rideAxsContent" class="section-gap"></div></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROGRESS ============================================== -->
+    <section id="screen-progress" class="screen" data-screen="progress">
+      <div class="page-head"><div class="eyebrow">BUILD A BASELINE</div><h1>PROGRESS.</h1><p class="sub">Nicht nur FTP. RideLab wird Effizienz, Konstanz, Leistung und Belastbarkeit über deine gesamte Historie verfolgen.</p></div>
+      <div class="segmented" style="grid-template-columns:repeat(4,1fr)"><button class="active">7D</button><button>4W</button><button>12W</button><button>ALL</button></div>
+      <div class="grid kpis">
+        <article class="card"><div class="metric-sm" id="progressTime">—</div><div class="label">Training time · all imported</div></article>
+        <article class="card"><div class="metric-sm" id="progressDistance">—</div><div class="label">Distance · all imported</div></article>
+        <article class="card"><div class="metric-sm" id="progressElevation">—</div><div class="label">Elevation · all imported</div></article>
+        <article class="card"><div class="metric-sm" id="progressRides">0</div><div class="label">Real rides stored</div></article>
+      </div>
+      <div class="grid two section-gap">
+        <article class="card">
+          <div class="eyebrow">WEEKLY LOAD</div><h3 style="margin-top:8px">Waiting for your rides.</h3>
+          <div class="chart-shell" aria-label="Empty weekly load chart"><svg viewBox="0 0 800 260" preserveAspectRatio="none"><path d="M0,220 C100,210 130,190 220,198 S360,176 430,183 S565,152 620,168 S730,125 800,140" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" opacity=".38"/></svg><div class="chart-caption">STRUCTURE PREVIEW · NO ATHLETE DATA</div></div>
+        </article>
+        <article class="card">
+          <div class="eyebrow" style="color:var(--green)">AEROBIC EFFICIENCY</div><h3 style="margin-top:8px">Power ↔ Heart Rate</h3>
+          <p>Später werden ähnliche Fahrten verglichen: gleiche Leistung bei niedrigerem Puls oder höhere Leistung bei gleichem Puls.</p>
+          <div class="notice">Baseline verfügbar, sobald genügend vergleichbare Fahrten importiert wurden.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- MORE ================================================== -->
+    <section id="screen-more" class="screen" data-screen="more">
+      <div id="more-home" class="subview active">
+        <div class="page-head"><div class="eyebrow">KNOW MORE. RIDE BETTER.</div><h1>MORE.</h1><p class="sub">Fuel, Wissen, Athletenprofil und Systemeinstellungen.</p></div>
+        <article class="card flat">
+          <button class="menu-link" data-more="fuel"><span>FUEL</span><span>→</span></button>
+          <button class="menu-link" data-more="learn"><span>LEARN</span><span>→</span></button>
+          <button class="menu-link" data-more="profile"><span>PROFILE</span><span>→</span></button>
+          <button class="menu-link" data-more="settings"><span>SETTINGS</span><span>→</span></button>
+          <button class="menu-link" data-more="about"><span>ABOUT</span><span>→</span></button>
+        </article>
+      </div>
+
+      <div id="more-fuel" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>FUEL.</h1><p class="sub">Flexibler Calculator statt hart codierter 750-ml-Flasche.</p></div>
+        <div class="grid two">
+          <article class="card hero green">
+            <div class="eyebrow" style="color:#111;opacity:.6">RIDE FUEL CALCULATOR</div>
+            <div class="form-grid section-gap">
+              <div class="field"><label>Duration · hours</label><input id="fuelDuration" type="number" min="0.5" max="12" step="0.25" value="2.5"></div>
+              <div class="field"><label>Intensity</label><select id="fuelIntensity"><option value="easy">Easy</option><option value="endurance" selected>Endurance</option><option value="tempo">Tempo</option><option value="hard">Hard</option></select></div>
+              <div class="field"><label>Temperature °C</label><input id="fuelTemp" type="number" min="-10" max="50" value="22"></div>
+              <div class="field"><label>Bottle size ml</label><input id="fuelBottle" type="number" min="250" max="2000" step="50" value="750"></div>
+            </div>
+            <button class="btn full section-gap" id="calcFuel">CALCULATE →</button>
+          </article>
+          <article class="card hero" id="fuelResult">
+            <div class="eyebrow">FOR THIS RIDE</div><div class="grid kpis section-gap" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div><div class="metric-sm" id="fuelCarbs">150 g</div><div class="label">Carbs total</div></div>
+              <div><div class="metric-sm" id="fuelFluid">1.6 L</div><div class="label">Fluid total</div></div>
+              <div><div class="metric-sm" id="fuelSodium">1500 mg</div><div class="label">Sodium total</div></div>
+              <div><div class="metric-sm" id="fuelBottles">3</div><div class="label">Bottles</div></div>
+            </div>
+            <div class="notice section-gap">Alpha.1 verwendet bewusst konservative Beispielregeln. In späteren Builds werden Körpergewicht, Schweißrate, individuelle Verträglichkeit und Trainingsziel einbezogen.</div>
+          </article>
+        </div>
+      </div>
+
+      <div id="more-learn" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>LEARN.</h1><p class="sub">Fachbegriffe so erklären, dass du dein Training ohne Trainer verstehen kannst.</p></div>
+        <div class="grid two">
+          <article class="card"><div class="eyebrow">FTP</div><h3 style="margin-top:8px">Functional Threshold Power</h3><p>Näherungswert für die höchste längerfristig haltbare Leistung. Wichtig für Power-Zonen, aber nicht der einzige Fortschrittsindikator.</p></article>
+          <article class="card"><div class="eyebrow" style="color:var(--green)">Z2</div><h3 style="margin-top:8px">Endurance</h3><p>Kontrollierter aerober Bereich. Du solltest noch in ganzen Sätzen sprechen können. Ziel ist Umfang ohne unnötige Ermüdung.</p></article>
+          <article class="card"><div class="eyebrow" style="color:var(--yellow)">SS</div><h3 style="margin-top:8px">Sweet Spot</h3><p>Praxisorientierter Bereich zwischen hohem Tempo und Schwelle: viel Trainingsreiz bei kontrollierbarer Ermüdung.</p></article>
+          <article class="card"><div class="eyebrow">RPE</div><h3 style="margin-top:8px">Rate of Perceived Exertion</h3><p>Subjektives Belastungsgefühl. Es ergänzt Watt und Herzfrequenz um die Frage: Wie hart fühlte es sich wirklich an?</p></article>
+        </div>
+      </div>
+
+      <div id="more-profile" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>PROFILE.</h1><p class="sub">Dein persistentes Athletenprofil steuert Zonen und die nächste Stufe der Trainingsplanung.</p></div>
+        <article class="card hero">
+          <div class="row wrap"><div><div class="eyebrow">ATHLETE</div><h2 id="profileHeadline" style="margin-top:8px">NOT SET UP YET.</h2></div><span class="db-badge">LOCAL DATABASE</span></div>
+          <div class="profile-summary" id="profileSummary"></div>
+          <div class="row wrap section-gap"><button class="btn" id="editProfileBtn">SET UP / EDIT PROFILE</button><button class="btn secondary" id="clearProfileBtn">CLEAR PROFILE</button></div>
+        </article>
+        <article class="card flat section-gap"><div class="eyebrow">PHYSIOLOGY SOURCE</div><p id="profileSources" style="margin:10px 0 0">Noch keine Werte gespeichert. FTP, LTHR und HRmax dürfen unbekannt bleiben.</p></article>
+      </div>
+
+      <div id="more-settings" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>SETTINGS.</h1><p class="sub">Appearance, Units, Data und Developer-Basis.</p></div>
+        <div class="grid two">
+          <article class="card flat"><div class="eyebrow">APPEARANCE</div><div class="toggle-row"><div><strong>Bright mode</strong><div class="muted">Dark/Bright preference persists.</div></div><button class="toggle" id="themeSwitch" aria-label="Bright mode"><span></span></button></div></article>
+          <article class="card flat"><div class="eyebrow">UNITS</div><div class="form-grid section-gap"><div class="field"><label>Distance</label><select><option>km</option><option>mi</option></select></div><div class="field"><label>Fluid</label><select><option>ml</option><option>oz</option></select></div></div></article>
+          <article class="card flat"><div class="eyebrow">DATA</div><p style="margin-top:10px">Athletenprofil und App-Daten liegen lokal in IndexedDB. Sichere deine RideLab-Daten als JSON.</p><div class="row wrap"><button class="btn secondary" id="exportBackupBtn">EXPORT BACKUP</button><button class="btn secondary" id="importBackupBtn">IMPORT BACKUP</button><input id="backupInput" type="file" accept="application/json,.json" hidden></div></article>
+          <article class="card flat"><div class="eyebrow">DEVELOPER</div><p style="margin-top:10px">Version <span data-app-version></span> · IndexedDB v1 · Athlete profile · FIT import · Advanced ride analytics · Hash Router.</p></article>
+        </div>
+      </div>
+
+      <div id="more-about" class="subview">
+        <div class="page-head"><div class="eyebrow"><button class="btn secondary" data-more="home">← MORE</button></div><h1>ABOUT.</h1><p class="sub">Ride. Understand. Adapt. Improve.</p></div>
+        <article class="card hero accent"><div class="metric-sm">RIDELAB PERFORMANCE</div><div class="label">Version <span data-app-version></span></div><p style="margin-top:18px">Italian cycling culture meets performance engineering. Alpha.5 adds advanced ride analytics: normalized power, intensity, load, variability, work, aerobic decoupling, distributions and evidence-based ride insights.</p></article>
+        <article class="card flat section-gap"><div class="eyebrow">CHANGELOG</div><div class="list-row"><div class="day">α5</div><div><strong>ADVANCED RIDE ANALYTICS</strong><small>NP · IF · Load · VI · Work · EF · Decoupling · Distributions · Insights</small></div><span class="pill">CURRENT</span></div><div class="list-row"><div class="day">α4</div><div><strong>RIDE STREAM UI</strong><small>Axes · Units · Toggle · Zoom · Pan · Shared cursor</small></div><span class="pill">BASE</span></div><div class="list-row"><div class="day">α3</div><div><strong>REAL FIT PIPELINE</strong><small>Parse · Normalize · Store · History · Detail · AXS detection</small></div><span class="pill">BASE</span></div><div class="list-row"><div class="day">α2</div><div><strong>ATHLETE DATA</strong><small>IndexedDB · Onboarding · Profile · Individual zones · Backup</small></div><span class="pill">BASE</span></div></article>
+      </div>
+    </section>
+  </main>
+
+
+  <!-- ONBOARDING · ALPHA.2 ===================================== -->
+  <div class="modal-backdrop" id="onboardingModal" aria-modal="true" role="dialog" aria-labelledby="onboardTitle">
+    <div class="onboarding">
+      <div class="onboarding-inner">
+        <div class="row"><div class="brand"><div class="brandmark">R</div><div><div class="eyebrow">RIDELAB SETUP</div><strong>ATHLETE PROFILE</strong></div></div><button class="btn secondary" id="closeOnboardingBtn">CLOSE</button></div>
+        <div class="step-progress" id="onboardProgress"><span></span><span></span><span></span><span></span><span></span></div>
+
+        <section class="onboarding-step active" data-step="1"><div class="eyebrow">01 · ATHLETE</div><h1 id="onboardTitle">START WITH YOU.</h1><p class="sub">Grunddaten für W/kg, Trainingsumfang und spätere Progression. Nichts davon wird online übertragen.</p><div class="form-grid section-gap"><div class="field"><label>Birth year</label><input id="obBirthYear" type="number" min="1930" max="2010" placeholder="e.g. 1968"></div><div class="field"><label>Sex · optional</label><select id="obSex"><option value="">Prefer not to say</option><option value="male">Male</option><option value="female">Female</option></select></div><div class="field"><label>Height cm</label><input id="obHeight" type="number" min="120" max="230" placeholder="e.g. 190"></div><div class="field"><label>Weight kg</label><input id="obWeight" type="number" min="35" max="220" step="0.1" placeholder="e.g. 90"></div><div class="field"><label>Target weight kg · optional</label><input id="obTargetWeight" type="number" min="35" max="220" step="0.1" placeholder="optional"></div></div></section>
+
+        <section class="onboarding-step" data-step="2"><div class="eyebrow">02 · TRAINING</div><h1>YOUR REAL WEEK.</h1><p class="sub">Der Plan soll in deinen Alltag passen, nicht umgekehrt.</p><div class="form-grid section-gap"><div class="field"><label>Experience</label><select id="obExperience"><option value="returning">Beginner / Returning</option><option value="recreational">Recreational</option><option value="trained">Trained</option></select></div><div class="field"><label>Days per week</label><select id="obDays"><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option></select></div><div class="field"><label>Weekday minutes</label><input id="obWeekday" type="number" min="20" max="240" step="5" value="60"></div><div class="field"><label>Weekend minutes</label><input id="obWeekend" type="number" min="30" max="480" step="5" value="180"></div><div class="field"><label>Current hours / week</label><input id="obCurrentHours" type="number" min="0" max="30" step="0.5" value="0"></div></div></section>
+
+        <section class="onboarding-step" data-step="3"><div class="eyebrow">03 · EQUIPMENT</div><h1>WHAT CAN WE MEASURE?</h1><p class="sub">Sensoren bestimmen, welche Analysen später zuverlässig möglich sind.</p><div class="choice-grid section-gap" id="equipmentChoices"><button class="choice selected" data-value="powerMeter">POWER METER</button><button class="choice selected" data-value="heartRate">HEART RATE</button><button class="choice selected" data-value="cadence">CADENCE</button><button class="choice selected" data-value="sramAXS">SRAM AXS</button><button class="choice" data-value="smartTrainer">SMART TRAINER</button></div></section>
+
+        <section class="onboarding-step" data-step="4"><div class="eyebrow">04 · PHYSIOLOGY</div><h1>KNOWN VALUES?</h1><p class="sub">Unbekannt ist völlig in Ordnung. RideLab erfindet keine Werte; spätere Fahrten und Tests können die Lücken schließen.</p><div class="form-grid section-gap"><div class="field"><label>FTP watts · optional</label><input id="obFtp" type="number" min="60" max="600" placeholder="unknown is okay"></div><div class="field"><label>FTP source</label><select id="obFtpSource"><option value="manual">Manual entry</option><option value="tested">Tested</option><option value="estimated">Estimated elsewhere</option></select></div><div class="field"><label>LTHR bpm · optional</label><input id="obLthr" type="number" min="80" max="220" placeholder="preferred for HR zones"></div><div class="field"><label>Max HR bpm · optional</label><input id="obHrMax" type="number" min="100" max="230" placeholder="fallback for HR zones"></div><div class="field"><label>Resting HR · optional</label><input id="obRestingHr" type="number" min="30" max="120" placeholder="optional"></div></div></section>
+
+        <section class="onboarding-step" data-step="5"><div class="eyebrow">05 · GOALS</div><h1>WHAT ARE WE BUILDING?</h1><p class="sub">Mehrere Ziele sind möglich. Sie werden später für die adaptive Planung gewichtet.</p><div class="choice-grid section-gap" id="goalChoices"><button class="choice selected" data-value="fitness">GENERAL FITNESS</button><button class="choice selected" data-value="endurance">ENDURANCE</button><button class="choice" data-value="weight">WEIGHT</button><button class="choice" data-value="climbing">CLIMBING</button><button class="choice" data-value="ftp">FTP</button><button class="choice" data-value="longDistance">LONG DISTANCE</button></div><article class="notice section-gap">Mit „Create my profile“ werden deine Angaben lokal in diesem Browser gespeichert. Der 12‑Wochen-Foundation-Block bleibt der Ausgangspunkt und wird in späteren Builds anhand realer Fahrten adaptiv.</article></section>
+
+        <div class="onboarding-actions"><button class="btn secondary" id="obBack">← BACK</button><button class="btn" id="obNext">NEXT →</button></div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="bottom-nav" aria-label="Mobile Navigation">
+    <button class="nav-btn" data-route="today" aria-label="Today"></button>
+    <button class="nav-btn" data-route="train" aria-label="Train"></button>
+    <button class="nav-btn" data-route="rides" aria-label="Rides"></button>
+    <button class="nav-btn" data-route="progress" aria-label="Progress"></button>
+    <button class="nav-btn" data-route="more" aria-label="More"></button>
+  </nav>
+</div>
+<script>
+/* =============================================================
+   01 · APP CONFIG
+   ============================================================= */
+const APP = { name:'RideLab Performance', version:'0.1.0-alpha.5', dbName:'RideLabDB', dbVersion:1, planStartDate:'2026-09-07', routes:['today','train','rides','progress','more'] };
+function renderAppVersion(){ document.querySelectorAll('[data-app-version]').forEach(el=>el.textContent=APP.version); document.title=`${APP.name} · ${APP.version}`; }
+const appState = { athlete:null, db:null, currentScreen:'today', theme:'dark', databaseReady:false, rides:[], currentRide:null, fitParserClass:null };
+
+/* =============================================================
+   02 · ICONS
+   ============================================================= */
+const icons = {
+  today:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span>TODAY</span>',
+  train:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M7 8v8M17 8v8M3 10v4M21 10v4"/></svg><span>TRAIN</span>',
+  rides:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="17" r="3"/><circle cx="18" cy="17" r="3"/><path d="M6 17l4-8h4l4 8M9 11h7M11 7h3"/></svg><span>RIDES</span>',
+  progress:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 18V9M10 18V5M16 18v-7M22 18V3"/></svg><span>PROGRESS</span>',
+  more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>MORE</span>',
+  sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+  moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>'
+};
+document.querySelectorAll('[data-route]').forEach(btn=>{ const r=btn.dataset.route; btn.innerHTML=icons[r]; });
+
+/* =============================================================
+   03 · THEME ENGINE
+   ============================================================= */
+function getTheme(){ return localStorage.getItem('ridelab.theme') || 'dark'; }
+function applyTheme(theme){ appState.theme=theme; document.documentElement.dataset.theme=theme; localStorage.setItem('ridelab.theme',theme); document.getElementById('themeToggle').innerHTML=theme==='dark'?icons.sun:icons.moon; document.getElementById('themeSwitch').classList.toggle('on',theme==='bright'); document.getElementById('themeColorMeta').setAttribute('content',theme==='dark'?'#0b0b0b':'#f0eee7'); }
+function toggleTheme(){ applyTheme(getTheme()==='dark'?'bright':'dark'); }
+document.getElementById('themeToggle').addEventListener('click',toggleTheme); document.getElementById('themeSwitch').addEventListener('click',toggleTheme);
+
+/* =============================================================
+   04 · INDEXEDDB · ALPHA.3
+   Athlete data and future ride stores share one versioned DB.
+   ============================================================= */
+function openDatabase(){ return new Promise((resolve,reject)=>{ const req=indexedDB.open(APP.dbName,APP.dbVersion); req.onupgradeneeded=e=>{ const db=e.target.result; const stores=['athlete','rides','rideStreams','rideAnalytics','dailyCheckins','rideFeedback','trainingPlans','workouts','nutritionProfiles','settings','appMeta']; stores.forEach(name=>{ if(!db.objectStoreNames.contains(name)) db.createObjectStore(name,{keyPath:'id'}); }); }; req.onsuccess=()=>{ appState.db=req.result; appState.databaseReady=true; resolve(req.result); }; req.onerror=()=>reject(req.error); }); }
+function dbGet(store,id){ return new Promise((resolve,reject)=>{ const tx=appState.db.transaction(store,'readonly'); const req=tx.objectStore(store).get(id); req.onsuccess=()=>resolve(req.result||null); req.onerror=()=>reject(req.error); }); }
+function dbPut(store,obj){ return new Promise((resolve,reject)=>{ const tx=appState.db.transaction(store,'readwrite'); tx.objectStore(store).put(obj); tx.oncomplete=()=>resolve(obj); tx.onerror=()=>reject(tx.error); }); }
+function dbClear(store){ return new Promise((resolve,reject)=>{ const tx=appState.db.transaction(store,'readwrite'); tx.objectStore(store).clear(); tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); }); }
+function dbAll(store){ return new Promise((resolve,reject)=>{ const tx=appState.db.transaction(store,'readonly'); const req=tx.objectStore(store).getAll(); req.onsuccess=()=>resolve(req.result||[]); req.onerror=()=>reject(req.error); }); }
+
+/* =============================================================
+   05 · ZONE ENGINE
+   Power zones use the RideLab v0.1 specification. HR uses LTHR
+   when known; HRmax is a documented fallback. No invented values.
+   ============================================================= */
+const powerDefs=[['Z1','RECOVERY',0,.55],['Z2','ENDURANCE',.56,.75],['Z3','TEMPO',.76,.87],['SS','SWEET SPOT',.88,.94],['Z4','THRESHOLD',.95,1.05],['Z5','VO₂ MAX',1.06,1.20],['Z6','ANAEROBIC',1.21,1.50],['Z7','NEUROMUSCULAR',1.51,null]];
+const lthrDefs=[['Z1','RECOVERY',0,.80],['Z2','ENDURANCE',.81,.89],['Z3','TEMPO',.90,.93],['Z4','THRESHOLD',.94,.99],['Z5','HIGH INTENSITY',1.00,null]];
+const hrMaxDefs=[['Z1','RECOVERY',.50,.59],['Z2','ENDURANCE',.60,.69],['Z3','TEMPO',.70,.79],['Z4','THRESHOLD',.80,.89],['Z5','HIGH INTENSITY',.90,1.00]];
+function bounds(value,min,max){ if(!value) return null; const lo=min===0?0:Math.round(value*min); const hi=max==null?null:Math.round(value*max); return {lo,hi}; }
+function formatRange(b,unit){ if(!b) return 'NOT SET'; if(b.lo===0) return `< ${b.hi} ${unit}`; if(b.hi==null) return `≥ ${b.lo} ${unit}`; return `${b.lo}–${b.hi} ${unit}`; }
+function getZones(athlete){ const ftp=Number(athlete?.physiology?.ftp)||0; const lthr=Number(athlete?.physiology?.lthr)||0; const hrMax=Number(athlete?.physiology?.hrMax)||0; return { power:powerDefs.map(d=>({...{code:d[0],name:d[1],pct:`${Math.round(d[2]*100)}${d[3]?`–${Math.round(d[3]*100)}`:'+'}%`},...{range:bounds(ftp,d[2],d[3])}})), hr:(lthr?lthrDefs:hrMaxDefs).map(d=>({...{code:d[0],name:d[1],pct:`${Math.round(d[2]*100)}${d[3]?`–${Math.round(d[3]*100)}`:'+'}%`},...{range:bounds(lthr||hrMax,d[2],d[3])}})), hrSource:lthr?'LTHR':hrMax?'HRMAX':null } }
+
+/* =============================================================
+   06 · ROUTING + SUBVIEWS
+   ============================================================= */
+function currentRoute(){ const raw=(location.hash||'#today').slice(1).split('/')[0]; return APP.routes.includes(raw)?raw:'today'; }
+function routeTo(route){ location.hash=route; }
+function renderRoute(){ const route=currentRoute(); appState.currentScreen=route; document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.dataset.screen===route)); document.querySelectorAll('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===route)); if(route!=='more') showMore('home'); window.scrollTo({top:0,behavior:'instant'}); }
+document.querySelectorAll('[data-route]').forEach(b=>b.addEventListener('click',()=>routeTo(b.dataset.route))); document.querySelectorAll('[data-jump]').forEach(b=>b.addEventListener('click',()=>routeTo(b.dataset.jump))); window.addEventListener('hashchange',renderRoute);
+document.querySelectorAll('[data-train-tab]').forEach(btn=>btn.addEventListener('click',()=>{ document.querySelectorAll('[data-train-tab]').forEach(b=>b.classList.toggle('active',b===btn)); document.getElementById('train-plan').classList.toggle('active',btn.dataset.trainTab==='plan'); document.getElementById('train-zones').classList.toggle('active',btn.dataset.trainTab==='zones'); }));
+function showMore(name){ document.querySelectorAll('#screen-more .subview').forEach(v=>v.classList.remove('active')); (document.getElementById('more-'+name)||document.getElementById('more-home')).classList.add('active'); }
+document.querySelectorAll('[data-more]').forEach(b=>b.addEventListener('click',()=>showMore(b.dataset.more))); document.querySelectorAll('[data-open-more]').forEach(b=>b.addEventListener('click',()=>{ routeTo('more'); setTimeout(()=>showMore(b.dataset.openMore),0); }));
+
+/* =============================================================
+   07 · ATHLETE ONBOARDING
+   ============================================================= */
+let obStep=1;
+const modal=document.getElementById('onboardingModal');
+function setOnboardingStep(step){ obStep=Math.max(1,Math.min(5,step)); document.querySelectorAll('.onboarding-step').forEach(s=>s.classList.toggle('active',Number(s.dataset.step)===obStep)); document.querySelectorAll('#onboardProgress span').forEach((s,i)=>s.classList.toggle('on',i<obStep)); document.getElementById('obBack').style.visibility=obStep===1?'hidden':'visible'; document.getElementById('obNext').textContent=obStep===5?'CREATE MY PROFILE →':'NEXT →'; }
+function openOnboarding(prefill=true){ if(prefill && appState.athlete) fillOnboarding(appState.athlete); setOnboardingStep(1); modal.classList.add('open'); document.body.style.overflow='hidden'; }
+function closeOnboarding(){ modal.classList.remove('open'); document.body.style.overflow=''; }
+function n(id){ const v=document.getElementById(id).value; return v===''?null:Number(v); }
+function selectedValues(containerId){ return [...document.querySelectorAll(`#${containerId} .choice.selected`)].map(x=>x.dataset.value); }
+function collectAthlete(){ const old=appState.athlete||{}; return { id:'primary', createdAt:old.createdAt||new Date().toISOString(), updatedAt:new Date().toISOString(), birthYear:n('obBirthYear'), sex:document.getElementById('obSex').value||null, heightCm:n('obHeight'), weightKg:n('obWeight'), targetWeightKg:n('obTargetWeight'), experienceLevel:document.getElementById('obExperience').value, currentTrainingHours:n('obCurrentHours')||0, goals:selectedValues('goalChoices'), trainingAvailability:{daysPerWeek:n('obDays')||3,weekdayMinutes:n('obWeekday')||60,weekendMinutes:n('obWeekend')||180}, equipment:{powerMeter:false,heartRate:false,cadence:false,sramAXS:false,smartTrainer:false,...Object.fromEntries(selectedValues('equipmentChoices').map(k=>[k,true]))}, physiology:{ftp:n('obFtp'),ftpSource:n('obFtp')?document.getElementById('obFtpSource').value:'unknown',lthr:n('obLthr'),lthrSource:n('obLthr')?'manual':'unknown',hrMax:n('obHrMax'),hrMaxSource:n('obHrMax')?'manual':'unknown',restingHR:n('obRestingHr'),vo2max:null}, planStartDate:old.planStartDate||APP.planStartDate } }
+function fillOnboarding(a){ const set=(id,v)=>document.getElementById(id).value=v??''; set('obBirthYear',a.birthYear); set('obSex',a.sex); set('obHeight',a.heightCm); set('obWeight',a.weightKg); set('obTargetWeight',a.targetWeightKg); set('obExperience',a.experienceLevel||'returning'); set('obDays',a.trainingAvailability?.daysPerWeek||3); set('obWeekday',a.trainingAvailability?.weekdayMinutes||60); set('obWeekend',a.trainingAvailability?.weekendMinutes||180); set('obCurrentHours',a.currentTrainingHours||0); set('obFtp',a.physiology?.ftp); set('obFtpSource',a.physiology?.ftpSource||'manual'); set('obLthr',a.physiology?.lthr); set('obHrMax',a.physiology?.hrMax); set('obRestingHr',a.physiology?.restingHR); document.querySelectorAll('#equipmentChoices .choice').forEach(c=>c.classList.toggle('selected',!!a.equipment?.[c.dataset.value])); document.querySelectorAll('#goalChoices .choice').forEach(c=>c.classList.toggle('selected',(a.goals||[]).includes(c.dataset.value))); }
+function validateStep(){ if(obStep===1){ if(!n('obBirthYear')||!n('obHeight')||!n('obWeight')){ alert('Please enter birth year, height and weight.'); return false; } } return true; }
+document.querySelectorAll('.choice').forEach(c=>c.addEventListener('click',()=>c.classList.toggle('selected')));
+document.getElementById('obBack').addEventListener('click',()=>setOnboardingStep(obStep-1));
+document.getElementById('obNext').addEventListener('click',async()=>{ if(!validateStep())return; if(obStep<5){ setOnboardingStep(obStep+1); return; } const athlete=collectAthlete(); await dbPut('athlete',athlete); appState.athlete=athlete; await dbPut('appMeta',{id:'schema',schemaVersion:1,appVersion:APP.version,updatedAt:new Date().toISOString()}); renderAthlete(); closeOnboarding(); });
+document.getElementById('closeOnboardingBtn').addEventListener('click',closeOnboarding); document.getElementById('editProfileBtn').addEventListener('click',()=>openOnboarding(true));
+document.getElementById('clearProfileBtn').addEventListener('click',async()=>{ if(!confirm('Clear the local athlete profile? Ride data is not affected.'))return; await dbClear('athlete'); appState.athlete=null; renderAthlete(); openOnboarding(false); });
+
+/* =============================================================
+   08 · PROFILE + INDIVIDUAL ZONE RENDERING
+   ============================================================= */
+function profileCompleteness(a){ if(!a)return 0; const checks=[a.birthYear,a.heightCm,a.weightKg,a.trainingAvailability?.daysPerWeek,a.experienceLevel,(a.goals||[]).length,(a.equipment&&Object.values(a.equipment).some(Boolean)),a.physiology?.ftp,(a.physiology?.lthr||a.physiology?.hrMax)]; return Math.round(checks.filter(Boolean).length/checks.length*100); }
+function renderZoneList(){ const a=appState.athlete,z=getZones(a); const row=(d,unit)=>`<div class="zone-row"><div class="zone-badge">${d.code}</div><div><strong>${d.name}</strong><small class="muted">${d.pct} of ${unit==='W'?'FTP':z.hrSource||'HR reference'}</small></div><div class="zone-range">${formatRange(d.range,unit)}</div></div>`; document.getElementById('powerZoneList').innerHTML=z.power.map(d=>row(d,'W')).join(''); document.getElementById('hrZoneList').innerHTML=z.hr.map(d=>row(d,'bpm')).join(''); document.getElementById('zoneNotice').textContent=!a?'Complete your athlete profile to create individual zones.':(!a.physiology?.ftp?'Power zones need an FTP. ':`Power zones use FTP ${a.physiology.ftp} W (${a.physiology.ftpSource}). `)+(!z.hrSource?'Heart-rate zones need LTHR or HRmax.':`Heart-rate zones use ${z.hrSource}.`); }
+document.querySelectorAll('[data-zone-tab]').forEach(btn=>btn.addEventListener('click',()=>{ document.querySelectorAll('[data-zone-tab]').forEach(b=>b.classList.toggle('active',b===btn)); document.getElementById('powerZoneList').classList.toggle('hidden',btn.dataset.zoneTab!=='power'); document.getElementById('hrZoneList').classList.toggle('hidden',btn.dataset.zoneTab!=='hr'); }));
+function renderAthlete(){ const a=appState.athlete; const summary=document.getElementById('profileSummary'); if(!a){ document.getElementById('profileHeadline').textContent='NOT SET UP YET.'; summary.innerHTML='<div class="profile-stat"><strong>—</strong><span>Weight</span></div><div class="profile-stat"><strong>—</strong><span>FTP</span></div>'; document.getElementById('profileSources').textContent='Noch keine Werte gespeichert. FTP, LTHR und HRmax dürfen unbekannt bleiben.'; document.getElementById('profileCompleteness').textContent='0'; document.getElementById('athleteStatusTitle').textContent='SET UP PROFILE'; document.getElementById('athleteStatusText').textContent='Persönliche Trainingswerte werden nach dem Onboarding aus deinem Profil berechnet.'; document.getElementById('todayPowerTarget').textContent='SET FTP'; document.getElementById('todayHrTarget').textContent='SET HR'; renderZoneList(); return; }
+ const age=new Date().getFullYear()-a.birthYear; document.getElementById('profileHeadline').textContent=`${a.experienceLevel.toUpperCase()} · ${a.trainingAvailability.daysPerWeek} DAYS / WEEK`; summary.innerHTML=`<div class="profile-stat"><strong>${age}</strong><span>Age</span></div><div class="profile-stat"><strong>${a.weightKg} kg</strong><span>Weight</span></div><div class="profile-stat"><strong>${a.physiology.ftp?`${a.physiology.ftp} W`:'—'}</strong><span>FTP</span></div><div class="profile-stat"><strong>${a.physiology.lthr||a.physiology.hrMax||'—'}</strong><span>${a.physiology.lthr?'LTHR':'HRmax'}</span></div>`; document.getElementById('profileSources').textContent=`FTP: ${a.physiology.ftp?`${a.physiology.ftp} W · ${a.physiology.ftpSource}`:'unknown'} · LTHR: ${a.physiology.lthr||'unknown'} · HRmax: ${a.physiology.hrMax||'unknown'}. Unknown values remain unknown until measured or derived.`; const comp=profileCompleteness(a); document.getElementById('profileCompleteness').textContent=comp; document.getElementById('athleteStatusTitle').textContent=comp>=75?'PROFILE READY':'PROFILE IN PROGRESS'; document.getElementById('athleteStatusText').textContent=`${a.trainingAvailability.daysPerWeek} training days/week · ${a.goals.length?a.goals.join(' · '):'goals not set'}`;
+ const zones=getZones(a),z2=zones.power.find(z=>z.code==='Z2'),hrz2=zones.hr.find(z=>z.code==='Z2'); document.getElementById('todayPowerTarget').textContent=formatRange(z2?.range,'W'); document.getElementById('todayPowerLabel').textContent=a.physiology.ftp?`Z2 from FTP ${a.physiology.ftp} W`:'Power target · FTP needed'; document.getElementById('todayHrTarget').textContent=formatRange(hrz2?.range,'').replace(/\s+$/,''); document.getElementById('todayHrLabel').textContent=zones.hrSource?`Z2 from ${zones.hrSource}`:'Heart rate · LTHR/HRmax needed'; renderZoneList(); }
+
+/* =============================================================
+   09 · FUEL CALCULATOR
+   ============================================================= */
+function calculateFuel(){ const h=Math.max(.5,Number(document.getElementById('fuelDuration').value)||1); const intensity=document.getElementById('fuelIntensity').value; const temp=Number(document.getElementById('fuelTemp').value)||20; const bottle=Math.max(250,Number(document.getElementById('fuelBottle').value)||750); const carbsH={easy:30,endurance:60,tempo:75,hard:90}[intensity]; let fluidH=temp>=30?800:temp>=20?650:550; if(intensity==='hard')fluidH+=50; const sodiumH=temp>=30?750:temp>=20?600:500; const totalCarbs=Math.round(carbsH*h),totalFluid=Math.round(fluidH*h/50)*50,totalSodium=Math.round(sodiumH*h/50)*50,bottles=Math.ceil(totalFluid/bottle); document.getElementById('fuelCarbs').textContent=totalCarbs+' g'; document.getElementById('fuelFluid').textContent=(totalFluid/1000).toFixed(1)+' L'; document.getElementById('fuelSodium').textContent=totalSodium+' mg'; document.getElementById('fuelBottles').textContent=bottles; }
+document.getElementById('calcFuel').addEventListener('click',calculateFuel);
+
+/* =============================================================
+   10 · REAL FIT IMPORT · ALPHA.5
+   Uses the pinned fit-file-parser 5.0.2 module on demand.
+   The parser accepts ArrayBuffer and exposes standard FIT fields.
+   RideLab normalizes parser output before any UI uses it.
+   ============================================================= */
+const fitInput=document.getElementById('fitInput');
+const fitStatus=document.getElementById('importStatus');
+function setFitStatus(title,text,percent=0){ fitStatus.classList.add('show'); document.getElementById('importStatusTitle').textContent=title; document.getElementById('importStatusText').textContent=text; document.getElementById('importProgressBar').style.width=Math.max(0,Math.min(100,percent))+'%'; }
+function clearFitStatus(delay=1600){ setTimeout(()=>fitStatus.classList.remove('show'),delay); }
+async function getFitParserClass(){
+  if(appState.fitParserClass)return appState.fitParserClass;
+  setFitStatus('LOADING FIT ENGINE','Loading pinned parser 5.0.2…',8);
+  try{
+    const mod=await import('https://esm.unpkg.com/fit-file-parser@5.0.2?target=es2022');
+    appState.fitParserClass=mod.default;
+    return appState.fitParserClass;
+  }catch(err){ throw new Error('FIT parser could not be loaded. Check your internet connection for the first import. '+(err?.message||err)); }
+}
+function finite(v){ const n=Number(v); return Number.isFinite(n)?n:null; }
+function firstFinite(...vals){ for(const v of vals){const n=finite(v);if(n!=null)return n;}return null; }
+function asDate(v){ if(v instanceof Date)return v; if(v==null)return null; const d=new Date(v); return Number.isNaN(d.getTime())?null:d; }
+function avg(arr){ const v=arr.filter(n=>Number.isFinite(n)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; }
+function maxv(arr){ const v=arr.filter(n=>Number.isFinite(n)); return v.length?Math.max(...v):null; }
+function simpleFileHash(buffer,file){ const a=new Uint8Array(buffer); let h=2166136261>>>0; const step=Math.max(1,Math.floor(a.length/8192)); for(let i=0;i<a.length;i+=step){h^=a[i];h=Math.imul(h,16777619)>>>0;} return `${file.size.toString(36)}-${h.toString(36)}`; }
+function valueFrom(record,names){ for(const name of names){ if(record && record[name]!=null)return record[name]; } return null; }
+function detectAXS(data,records){
+  const messages=data?.messages||{}; const events=[...(data?.events||[]),...(messages.event||[])];
+  const shiftEvents=events.filter(e=>String(e?.event||e?.event_type||'').toLowerCase().includes('gear')||String(e?.event||'').toLowerCase().includes('shift'));
+  const fieldSet=new Set();
+  const scan=o=>{ if(!o||typeof o!=='object')return; Object.keys(o).forEach(k=>{const q=k.toLowerCase();if(q.includes('gear')||q.includes('shift')||q.includes('drivetrain'))fieldSet.add(k);}); };
+  records.slice(0,Math.min(records.length,1000)).forEach(scan); Object.values(messages).flatMap(v=>Array.isArray(v)?v:[]).slice(0,1500).forEach(scan);
+  let front=0,rear=0; for(const e of shiftEvents){ const s=String(e?.event||e?.event_type||'').toLowerCase(); if(s.includes('front'))front++; else if(s.includes('rear'))rear++; }
+  const gearSamples=[]; let last='';
+  for(const r of records){
+    const fg=valueFrom(r,['front_gear','front_gear_num','front_gear_teeth','shifting_front_gear','shifting_front_gear_teeth']);
+    const rg=valueFrom(r,['rear_gear','rear_gear_num','rear_gear_teeth','shifting_rear_gear','shifting_rear_gear_teeth']);
+    if(fg!=null||rg!=null){ const key=`${fg??'?'}×${rg??'?'}`; if(key!==last){gearSamples.push({timestamp:r.timestamp,front:fg,rear:rg,key});last=key;} }
+  }
+  const totalFromFields=firstFinite(data?.session?.total_shifts,data?.sessions?.[0]?.total_shifts,data?.session?.shifting_count,data?.sessions?.[0]?.shifting_count);
+  return {available:fieldSet.size>0||shiftEvents.length>0||gearSamples.length>0,totalShifts:totalFromFields??(front+rear||shiftEvents.length||null),frontShifts:front||null,rearShifts:rear||null,fieldNames:[...fieldSet].sort(),gearSamples:gearSamples.slice(0,500),shiftEvents:shiftEvents.slice(0,1000)};
+}
+function recordQuality(records,fieldNames){ if(!records.length)return 0; let ok=0; for(const r of records){ if(fieldNames.some(f=>r?.[f]!=null&&Number.isFinite(Number(r[f]))))ok++; } return Math.round(ok/records.length*100); }
+function qualityLabel(p){ return p>=95?'Excellent':p>=80?'Good':p>=50?'Partial':p>0?'Low':'Missing'; }
+function finiteSeries(values){ return (values||[]).map(Number).filter(Number.isFinite); }
+function meanFinite(values){ const a=finiteSeries(values); return a.length?a.reduce((s,v)=>s+v,0)/a.length:null; }
+function percentile(values,p){ const a=finiteSeries(values).sort((x,y)=>x-y); if(!a.length)return null; const i=(a.length-1)*p,lo=Math.floor(i),hi=Math.ceil(i); return lo===hi?a[lo]:a[lo]+(a[hi]-a[lo])*(i-lo); }
+function timestampSeconds(t){ const d=t instanceof Date?t:new Date(t); const ms=d.getTime(); return Number.isFinite(ms)?ms/1000:null; }
+function integrateWorkKJ(stream){ const p=stream?.power||[],ts=stream?.timestamps||[]; if(p.length<2)return null; let joules=0,valid=0; for(let i=1;i<p.length;i++){ const a=Number(p[i-1]),b=Number(p[i]); if(!Number.isFinite(a)||!Number.isFinite(b))continue; let dt=null; const ta=timestampSeconds(ts[i-1]),tb=timestampSeconds(ts[i]); if(Number.isFinite(ta)&&Number.isFinite(tb)&&tb>ta&&tb-ta<30)dt=tb-ta; else dt=1; joules+=((a+b)/2)*dt; valid++; } return valid?joules/1000:null; }
+function resamplePower1s(stream){ const p=stream?.power||[],ts=stream?.timestamps||[]; if(!p.length)return []; const hasTs=ts.length===p.length&&ts.some(Boolean); if(!hasTs)return p.map(v=>Number.isFinite(Number(v))?Number(v):0); let start=timestampSeconds(ts[0]),end=timestampSeconds(ts[ts.length-1]); if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return p.map(v=>Number.isFinite(Number(v))?Number(v):0); const maxLen=Math.min(86400,Math.max(1,Math.ceil(end-start)+1)),out=new Array(maxLen).fill(0); let j=0,last=0; for(let s=0;s<maxLen;s++){ const target=start+s; while(j+1<ts.length){ const n=timestampSeconds(ts[j+1]); if(!Number.isFinite(n)||n>target)break; j++; } const v=Number(p[j]); if(Number.isFinite(v))last=v; out[s]=last; } return out; }
+function normalizedPowerFromStream(stream){ const p=resamplePower1s(stream); if(p.length<30)return null; let sum=0,qsum=0,count=0; for(let i=0;i<p.length;i++){ sum+=p[i]; if(i>=30)sum-=p[i-30]; if(i>=29){ const r=sum/30; qsum+=Math.pow(Math.max(0,r),4); count++; } } return count?Math.pow(qsum/count,.25):null; }
+function efficiencyFactor(np,avgHr){ return Number.isFinite(np)&&Number.isFinite(avgHr)&&avgHr>0?np/avgHr:null; }
+function aerobicDecoupling(stream){ const p=stream?.power||[],h=stream?.heartRate||[]; const n=Math.min(p.length,h.length); if(n<120)return null; const samples=[]; for(let i=0;i<n;i++){const pw=Number(p[i]),hr=Number(h[i]);if(Number.isFinite(pw)&&pw>0&&Number.isFinite(hr)&&hr>40)samples.push([pw,hr]);} if(samples.length<120)return null; const m=Math.floor(samples.length/2),a=samples.slice(0,m),b=samples.slice(m); const ef=x=>{const pw=x.reduce((s,v)=>s+v[0],0)/x.length,hr=x.reduce((s,v)=>s+v[1],0)/x.length;return hr>0?pw/hr:null}; const e1=ef(a),e2=ef(b); return Number.isFinite(e1)&&Number.isFinite(e2)&&e1!==0?((e1-e2)/e1)*100:null; }
+function histogram(values,bins,minOverride=null,maxOverride=null){ const a=finiteSeries(values); if(!a.length)return null; let lo=minOverride??Math.min(...a),hi=maxOverride??Math.max(...a); if(hi<=lo)hi=lo+1; const counts=new Array(bins).fill(0),step=(hi-lo)/bins; a.forEach(v=>{let i=Math.floor((v-lo)/step);i=Math.max(0,Math.min(bins-1,i));counts[i]++;}); return counts.map((count,i)=>({from:lo+i*step,to:lo+(i+1)*step,count,percent:100*count/a.length})); }
+function buildDistributions(stream){ return { power:histogram(stream?.power,8,0,percentile(stream?.power||[],.98)||null), heartRate:histogram(stream?.heartRate,7), cadence:histogram(stream?.cadence,7,0,percentile(stream?.cadence||[],.98)||null) }; }
+function calcAdvancedAnalytics(ride,stream,ftp){ const np=Number.isFinite(Number(ride.normalizedPower))?Number(ride.normalizedPower):normalizedPowerFromStream(stream); const avgP=Number(ride.avgPower)||meanFinite(stream?.power); const avgHr=Number(ride.avgHeartRate)||meanFinite(stream?.heartRate); const duration=Number(ride.durationSec)||0; const validFtp=Number.isFinite(Number(ftp))&&Number(ftp)>0; const intF=validFtp&&Number.isFinite(np)?np/Number(ftp):null; const load=validFtp&&Number.isFinite(np)&&Number.isFinite(intF)&&duration>0?(duration*np*intF/(Number(ftp)*3600))*100:null; const vi=Number.isFinite(np)&&Number.isFinite(avgP)&&avgP>0?np/avgP:null; const work=Number.isFinite(Number(ride.workKJ))&&Number(ride.workKJ)>0?Number(ride.workKJ):integrateWorkKJ(stream); const ef=efficiencyFactor(np,avgHr); const dec=aerobicDecoupling(stream); return {normalizedPower:np,intensityFactor:intF,trainingLoad:load,variabilityIndex:vi,workKJ:work,efficiencyFactor:ef,aerobicDecoupling:dec,distributions:buildDistributions(stream)}; }
+function generateRideInsights(ride,a){ const out=[]; if(Number.isFinite(a.aerobicDecoupling)){ const d=a.aerobicDecoupling; if(d<=5)out.push({tone:'good',title:'STABLE AEROBIC RESPONSE',text:`Power-to-heart-rate drift was ${d.toFixed(1)}%. Your second half stayed physiologically controlled.`}); else if(d<=10)out.push({tone:'warn',title:'NOTICEABLE CARDIAC DRIFT',text:`Decoupling reached ${d.toFixed(1)}%. Heat, fueling, fatigue or pacing may have contributed.`}); else out.push({tone:'warn',title:'HIGH CARDIAC DRIFT',text:`Decoupling reached ${d.toFixed(1)}%. Review pacing, hydration and fatigue before increasing endurance load.`}); }
+  if(Number.isFinite(a.variabilityIndex)){ if(a.variabilityIndex<=1.08)out.push({tone:'good',title:'SMOOTH POWER DELIVERY',text:`Variability Index was ${a.variabilityIndex.toFixed(2)}. Power was relatively steady.`}); else if(a.variabilityIndex>=1.18)out.push({tone:'warn',title:'VARIABLE POWER',text:`Variability Index was ${a.variabilityIndex.toFixed(2)}. Frequent surges increased physiological cost.`}); }
+  if(Number.isFinite(a.intensityFactor)){ if(a.intensityFactor<.65)out.push({tone:'neutral',title:'LOW INTENSITY RIDE',text:`Intensity was ${(a.intensityFactor*100).toFixed(0)}% of FTP by normalized power.`}); else if(a.intensityFactor<.80)out.push({tone:'good',title:'ENDURANCE INTENSITY',text:`Intensity was ${(a.intensityFactor*100).toFixed(0)}% of FTP by normalized power.`}); else if(a.intensityFactor>=.90)out.push({tone:'warn',title:'HIGH INTENSITY LOAD',text:`Intensity reached ${(a.intensityFactor*100).toFixed(0)}% of FTP. Recovery demand is materially higher.`}); }
+  if(Number.isFinite(a.workKJ))out.push({tone:'neutral',title:'MECHANICAL WORK',text:`You produced about ${Math.round(a.workKJ)} kJ of mechanical work during this ride.`}); return out.slice(0,4); }
+function calcZoneDistribution(records,ftp){ if(!ftp||!records.length)return null; const secs={Z1:0,Z2:0,Z3:0,SS:0,Z4:0,Z5:0,Z6:0,Z7:0}; let total=0; for(let i=0;i<records.length;i++){ const p=finite(records[i]?.power); if(p==null)continue; const t=asDate(records[i]?.timestamp),t2=asDate(records[i+1]?.timestamp); let dt=t&&t2?(t2-t)/1000:1; if(!Number.isFinite(dt)||dt<=0||dt>10)dt=1; let z='Z7'; if(p<ftp*.56)z='Z1'; else if(p<=ftp*.75)z='Z2'; else if(p<=ftp*.87)z='Z3'; else if(p<=ftp*.94)z='SS'; else if(p<=ftp*1.05)z='Z4'; else if(p<=ftp*1.20)z='Z5'; else if(p<=ftp*1.50)z='Z6'; secs[z]+=dt; total+=dt; } if(!total)return null; return Object.fromEntries(Object.entries(secs).map(([k,v])=>[k,{seconds:Math.round(v),percent:+(v/total*100).toFixed(1)}])); }
+function normalizeFit(file,buffer,data){
+  const records=Array.isArray(data?.records)?data.records:[]; const session=(data?.sessions||[])[0]||data?.session||{};
+  const timestamps=records.map(r=>asDate(r.timestamp)).filter(Boolean); const start=asDate(session.start_time)||timestamps[0]||new Date(file.lastModified||Date.now());
+  const end=asDate(session.timestamp)||timestamps[timestamps.length-1]||null;
+  const power=records.map(r=>finite(r.power)); const hr=records.map(r=>finite(r.heart_rate)); const cad=records.map(r=>finite(r.cadence)); const speed=records.map(r=>finite(r.speed)); const alt=records.map(r=>finite(r.altitude));
+  const duration=firstFinite(session.total_timer_time,session.total_elapsed_time,end&&start?(end-start)/1000:null,records.at(-1)?.timer_time,records.at(-1)?.elapsed_time)||0;
+  const distance=firstFinite(session.total_distance,records.at(-1)?.distance)||0;
+  const axs=detectAXS(data,records);
+  const quality={power:recordQuality(records,['power']),heartRate:recordQuality(records,['heart_rate']),cadence:recordQuality(records,['cadence']),gps:Math.min(recordQuality(records,['position_lat']),recordQuality(records,['position_long'])),axs:axs.available?100:0};
+  const id='fit-'+simpleFileHash(buffer,file);
+  const ride={id,activityId:id,fileName:file.name,fileSize:file.size,importedAt:new Date().toISOString(),date:start.toISOString(),startTime:start.toISOString(),sport:String(session.sport||'cycling'),durationSec:Math.round(duration),movingTimeSec:Math.round(firstFinite(session.total_timer_time,duration)||0),distanceM:Math.round(distance),elevationGainM:Math.round(firstFinite(session.total_ascent,0)||0),calories:firstFinite(session.total_calories),avgSpeedMps:firstFinite(session.avg_speed,avg(speed)),maxSpeedMps:firstFinite(session.max_speed,maxv(speed)),avgPower:firstFinite(session.avg_power,avg(power)),maxPower:firstFinite(session.max_power,maxv(power)),normalizedPower:firstFinite(session.normalized_power,session.enhanced_avg_power),avgHeartRate:firstFinite(session.avg_heart_rate,avg(hr)),maxHeartRate:firstFinite(session.max_heart_rate,maxv(hr)),avgCadence:firstFinite(session.avg_cadence,avg(cad)),maxCadence:firstFinite(session.max_cadence,maxv(cad)),avgTemperature:firstFinite(session.avg_temperature),trainingLoad:null,intensityFactor:null,workKJ:session.total_work!=null?Number(session.total_work)/1000:null,hasGPS:quality.gps>0,hasPower:quality.power>0,hasHR:quality.heartRate>0,hasCadence:quality.cadence>0,hasAXS:axs.available,dataQuality:quality,recordCount:records.length};
+  const stream={id,rideId:id,timestamps:records.map(r=>asDate(r.timestamp)?.toISOString()||null),power,heartRate:hr,cadence:cad,speed,altitude:alt,grade:records.map(r=>finite(r.grade)),latitude:records.map(r=>finite(r.position_lat)),longitude:records.map(r=>finite(r.position_long)),temperature:records.map(r=>finite(r.temperature)),frontGear:records.map(r=>valueFrom(r,['front_gear','front_gear_num','front_gear_teeth','shifting_front_gear','shifting_front_gear_teeth'])),rearGear:records.map(r=>valueFrom(r,['rear_gear','rear_gear_num','rear_gear_teeth','shifting_rear_gear','shifting_rear_gear_teeth']))};
+  const ftp=Number(appState.athlete?.physiology?.ftp)||0;
+  const advanced=calcAdvancedAnalytics(ride,stream,ftp);
+  Object.assign(ride,{normalizedPower:advanced.normalizedPower,trainingLoad:advanced.trainingLoad,intensityFactor:advanced.intensityFactor,workKJ:advanced.workKJ});
+  const analytics={id,rideId:id,powerZones:calcZoneDistribution(records,ftp),hrZones:null,cadenceDistribution:advanced.distributions.heartRate,powerDistribution:advanced.distributions.power,efficiencyFactor:advanced.efficiencyFactor,aerobicDecoupling:advanced.aerobicDecoupling,variabilityIndex:advanced.variabilityIndex,powerDuration:{},axsAnalytics:axs,distributions:advanced.distributions,insights:generateRideInsights(ride,advanced)};
+  return {ride,stream,analytics};
+}
+async function persistRideBundle(bundle){
+  const {ride,stream,analytics}=bundle; const existing=await dbGet('rides',ride.id); if(existing)return {duplicate:true,ride:existing};
+  return new Promise((resolve,reject)=>{ const tx=appState.db.transaction(['rides','rideStreams','rideAnalytics'],'readwrite'); tx.objectStore('rides').put(ride); tx.objectStore('rideStreams').put(stream); tx.objectStore('rideAnalytics').put(analytics); tx.oncomplete=()=>resolve({duplicate:false,ride}); tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error('Import transaction aborted')); });
+}
+async function parseFitFile(file,index,total){
+  setFitStatus('READING FIT',`${index+1}/${total} · ${file.name}`,12);
+  if(!file.name.toLowerCase().endsWith('.fit'))throw new Error('Not a .FIT file');
+  const buffer=await file.arrayBuffer(); if(buffer.byteLength<14)throw new Error('File is too small to be a FIT activity');
+  const existing=await dbGet('rides','fit-'+simpleFileHash(buffer,file)); if(existing)return {duplicate:true,ride:existing};
+  const FitParser=await getFitParserClass(); setFitStatus('PARSING FIT',`${file.name} · decoding records…`,35);
+  const parser=new FitParser({mode:'list',force:true,speedUnit:'m/s',lengthUnit:'m',temperatureUnit:'celsius',elapsedRecordField:true});
+  let data; try{data=await parser.parseAsync(buffer);}catch(err){throw new Error(typeof err==='string'?err:(err?.message||'FIT parsing failed'));}
+  if(!(data?.records?.length||data?.sessions?.length))throw new Error('No cycling activity records were found');
+  setFitStatus('NORMALIZING',`${data.records?.length||0} record points`,60); const bundle=normalizeFit(file,buffer,data);
+  setFitStatus('SAVING RIDE',`${bundle.ride.distanceM?formatDistance(bundle.ride.distanceM):'Activity'} · local database`,82); const result=await persistRideBundle(bundle);
+  return result;
+}
+async function importFitFiles(files){ let imported=0,duplicates=0,failed=[]; const arr=[...files]; for(let i=0;i<arr.length;i++){ try{ const r=await parseFitFile(arr[i],i,arr.length); if(r.duplicate)duplicates++; else imported++; }catch(err){ failed.push(`${arr[i].name}: ${err.message||err}`); } }
+  setFitStatus(failed.length?'IMPORT FINISHED WITH NOTES':'IMPORT COMPLETE',`${imported} imported · ${duplicates} duplicate${duplicates===1?'':'s'}${failed.length?` · ${failed.length} failed`:''}`,100); await refreshRideLibrary(); clearFitStatus(2800);
+  if(failed.length)alert('Some FIT files could not be imported\n\n'+failed.join('\n'));
+}
+document.getElementById('importFitBtn').addEventListener('click',()=>fitInput.click()); fitInput.addEventListener('change',async()=>{ if(!fitInput.files.length)return; await importFitFiles(fitInput.files); fitInput.value=''; });
+
+/* =============================================================
+   10B · RIDE LIBRARY + DETAIL
+   ============================================================= */
+function formatDuration(sec){ sec=Math.max(0,Math.round(sec||0)); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60); return h?`${h}:${String(m).padStart(2,'0')} h`:`${m} min`; }
+function formatDistance(m){ return `${(Number(m||0)/1000).toFixed(1)} km`; }
+function formatRideDate(iso){ const d=new Date(iso); return Number.isNaN(d)?'—':new Intl.DateTimeFormat('de-DE',{day:'2-digit',month:'short',year:'numeric'}).format(d).toUpperCase(); }
+function metric(value,unit=''){ return value==null||!Number.isFinite(Number(value))?'—':`${Math.round(Number(value))}${unit}`; }
+function baselineLabel(n){ return n<3?'BUILDING YOUR BASELINE.':n<10?'EARLY TREND.':'PERSONAL BASELINE AVAILABLE.'; }
+async function refreshRideLibrary(){ appState.rides=(await dbAll('rides')).sort((a,b)=>new Date(b.date)-new Date(a.date)); const n=appState.rides.length; document.getElementById('rideHistoryHeadline').textContent=baselineLabel(n); document.getElementById('rideCountPill').textContent=`${n} RIDE${n===1?'':'S'}`; const el=document.getElementById('rideHistory'); if(!n){el.innerHTML='<div class="ride-empty"><p>No real rides imported yet. Choose your first Karoo FIT file above.</p></div>';renderProgress();return;}
+  el.innerHTML=appState.rides.map(r=>`<button class="ride-item" data-ride-id="${r.id}"><div><strong>${formatRideDate(r.date).split(' ')[0]} ${formatRideDate(r.date).split(' ')[1]||''}</strong><small>${new Date(r.date).getFullYear()}</small></div><div><strong>${r.fileName.replace(/\.fit$/i,'')}</strong><small>${[r.hasPower?'POWER':null,r.hasHR?'HR':null,r.hasCadence?'CADENCE':null,r.hasAXS?'AXS':null].filter(Boolean).join(' · ')||'FIT ACTIVITY'}</small></div><div class="ride-value">${formatDistance(r.distanceM)}<small>DISTANCE</small></div><div class="ride-value ride-hide-mobile">${formatDuration(r.durationSec)}<small>DURATION</small></div><div class="ride-value ride-hide-mobile">${r.avgPower!=null?Math.round(r.avgPower)+' W':'—'}<small>AVG POWER</small></div></button>`).join('');
+  el.querySelectorAll('[data-ride-id]').forEach(b=>b.addEventListener('click',()=>openRideDetail(b.dataset.rideId))); renderProgress(); }
+function qualityMarkup(name,p){return `<div class="quality-item"><strong>${name}</strong><small>${qualityLabel(p)}${p?` · ${p}%`:''}</small></div>`;}
+function sensorMarkup(label,ok){return `<span class="pill ${ok?'sensor-ok':'sensor-miss'}">${ok?'✓':'—'} ${label}</span>`;}
+const rideStreamUI={stream:null,active:{power:true,heartRate:true,elevation:true,cadence:false,speed:false},viewStart:0,viewEnd:1,hoverIndex:null,pointers:new Map(),drag:null,lastTap:0};
+const STREAM_META={power:{label:'POWER',unit:'W',color:'var(--accent)'},heartRate:{label:'HEART RATE',unit:'bpm',color:'var(--green)'},elevation:{label:'ELEVATION',unit:'m',color:'var(--yellow)'},cadence:{label:'CADENCE',unit:'rpm',color:'#65b9ff'},speed:{label:'SPEED',unit:'km/h',color:'#c790ff'}};
+function streamValues(key){const a=rideStreamUI.stream?.[key]||[];return key==='speed'?a.map(v=>finite(v)==null?null:finite(v)*3.6):a.map(v=>finite(v));}
+function streamLength(){return Math.max(0,...Object.keys(STREAM_META).map(k=>(rideStreamUI.stream?.[k]||[]).length));}
+function elapsedAt(i){const ts=rideStreamUI.stream?.timestamps||[];const d0=ts[0]?new Date(ts[0]):null,di=ts[i]?new Date(ts[i]):null;if(d0&&di&&!isNaN(d0)&&!isNaN(di))return Math.max(0,(di-d0)/1000);const ride=appState.currentRide;return streamLength()>1?(Number(ride?.durationSec)||0)*i/(streamLength()-1):0;}
+function fmtElapsed(sec){sec=Math.max(0,Math.round(sec||0));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return h?`${h}:${String(m).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`;}
+function niceTicks(lo,hi,count=4){if(!Number.isFinite(lo)||!Number.isFinite(hi))return[];if(lo===hi){lo-=1;hi+=1;}const span=hi-lo,raw=span/Math.max(1,count),mag=10**Math.floor(Math.log10(raw)),norm=raw/mag;const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag;const a=Math.floor(lo/step)*step,b=Math.ceil(hi/step)*step,out=[];for(let v=a;v<=b+step*.25;v+=step)out.push(v);return out;}
+function pathFromValues(vals,i0,i1,x,y,w,h,lo,hi){const den=Math.max(1,i1-i0),range=(hi-lo)||1;let d='',drawing=false;for(let i=i0;i<=i1;i++){const v=vals[i];if(v==null){drawing=false;continue;}const px=x+(i-i0)/den*w,py=y+h-(v-lo)/range*h;d+=(drawing?'L':'M')+px.toFixed(1)+','+py.toFixed(1);drawing=true;}return d;}
+function inspectorMarkup(index){const host=document.getElementById('streamInspector');if(!host)return;const n=streamLength(),i=index==null?Math.max(0,Math.min(n-1,Math.round((rideStreamUI.viewStart+rideStreamUI.viewEnd)/2*(n-1)))):index;host.innerHTML=Object.entries(STREAM_META).map(([k,m])=>{const v=streamValues(k)[i],on=rideStreamUI.active[k];return `<div class="quality-item ${on?'':'off'}"><strong>${on&&v!=null?(k==='speed'?v.toFixed(1):Math.round(v)):'—'} ${on&&v!=null?m.unit:''}</strong><small>${m.label}${on?` · ${fmtElapsed(elapsedAt(i))}`:' · OFF'}</small></div>`;}).join('');}
+function renderStreamChart(stream=rideStreamUI.stream){const svg=document.getElementById('rideStreamChart');if(!svg)return;rideStreamUI.stream=stream;const n=streamLength();if(n<2){svg.innerHTML='<text x="50%" y="50%" text-anchor="middle" fill="currentColor" opacity=".55">No stream data</text>';inspectorMarkup(null);return;}const active=Object.keys(STREAM_META).filter(k=>rideStreamUI.active[k]&&streamValues(k).some(v=>v!=null));if(!active.length){svg.innerHTML='<text x="50%" y="50%" text-anchor="middle" fill="currentColor" opacity=".55">Select at least one available stream</text>';inspectorMarkup(null);return;}const W=1000,H=520,left=82,right=24,top=22,bottom=48,gap=14,plotW=W-left-right,panelH=(H-top-bottom-gap*(active.length-1))/active.length;i0=Math.max(0,Math.min(n-2,Math.floor(rideStreamUI.viewStart*(n-1))));i1=Math.max(i0+1,Math.min(n-1,Math.ceil(rideStreamUI.viewEnd*(n-1))));let out=`<rect x="0" y="0" width="1000" height="520" fill="transparent"/>`;active.forEach((key,pidx)=>{const vals=streamValues(key),visible=vals.slice(i0,i1+1).filter(v=>v!=null);if(!visible.length)return;let lo=Math.min(...visible),hi=Math.max(...visible);if(key==='power'||key==='cadence'||key==='speed')lo=Math.min(0,lo);let pad=(hi-lo||1)*.08;lo-=pad;hi+=pad;const y=top+pidx*(panelH+gap),meta=STREAM_META[key],ticks=niceTicks(lo,hi,3);out+=`<text x="14" y="${(y+16).toFixed(1)}" fill="${meta.color}" font-size="13" font-weight="800">${meta.label}</text><text x="14" y="${(y+34).toFixed(1)}" fill="currentColor" opacity=".55" font-size="12">${meta.unit}</text>`;ticks.forEach(t=>{if(t<lo-pad||t>hi+pad)return;const py=y+panelH-(t-lo)/(hi-lo)*panelH;out+=`<line x1="${left}" y1="${py.toFixed(1)}" x2="${W-right}" y2="${py.toFixed(1)}" stroke="currentColor" opacity=".08"/><text x="${left-10}" y="${(py+4).toFixed(1)}" text-anchor="end" fill="currentColor" opacity=".58" font-size="12">${Math.abs(t)>=100?Math.round(t):Number(t.toFixed(1))}</text>`;});out+=`<path d="${pathFromValues(vals,i0,i1,left,y,plotW,panelH,lo,hi)}" fill="none" stroke="${meta.color}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>`;});
+const totalDur=elapsedAt(n-1)||Number(appState.currentRide?.durationSec)||0;for(let j=0;j<=5;j++){const f=j/5,idx=Math.round(i0+f*(i1-i0)),x=left+f*plotW;out+=`<line x1="${x}" y1="${top}" x2="${x}" y2="${H-bottom}" stroke="currentColor" opacity=".055"/><text x="${x}" y="${H-18}" text-anchor="middle" fill="currentColor" opacity=".62" font-size="12">${fmtElapsed(elapsedAt(idx)||totalDur*(idx/(n-1)))}</text>`;}out+=`<text x="${left+plotW/2}" y="${H-3}" text-anchor="middle" fill="currentColor" opacity=".45" font-size="11">RIDE TIME</text>`;
+if(rideStreamUI.hoverIndex!=null){const idx=Math.max(i0,Math.min(i1,rideStreamUI.hoverIndex)),x=left+(idx-i0)/(i1-i0)*plotW;out+=`<line x1="${x}" y1="${top}" x2="${x}" y2="${H-bottom}" stroke="currentColor" opacity=".72" stroke-width="1.5"/>`;}svg.innerHTML=out;inspectorMarkup(rideStreamUI.hoverIndex);}
+function setStreamWindow(start,end){const min=.02;start=Math.max(0,start);end=Math.min(1,end);if(end-start<min){const c=(start+end)/2;start=c-min/2;end=c+min/2;if(start<0){end-=start;start=0}if(end>1){start-=end-1;end=1}}rideStreamUI.viewStart=Math.max(0,start);rideStreamUI.viewEnd=Math.min(1,end);renderStreamChart();}
+function resetStreamView(){rideStreamUI.viewStart=0;rideStreamUI.viewEnd=1;rideStreamUI.hoverIndex=null;renderStreamChart();}
+function streamIndexAtClientX(clientX){const svg=document.getElementById('rideStreamChart'),r=svg.getBoundingClientRect(),left=82/1000*r.width,right=24/1000*r.width,plot=Math.max(1,r.width-left-right),f=Math.max(0,Math.min(1,(clientX-r.left-left)/plot)),n=streamLength(),i0=Math.floor(rideStreamUI.viewStart*(n-1)),i1=Math.ceil(rideStreamUI.viewEnd*(n-1));return Math.round(i0+f*(i1-i0));}
+function initRideStreamControls(){document.querySelectorAll('#streamLegend [data-stream]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.stream,vals=streamValues(k);if(!vals.some(v=>v!=null))return;b.classList.toggle('active');rideStreamUI.active[k]=b.classList.contains('active');renderStreamChart();}));document.getElementById('streamResetZoom')?.addEventListener('click',resetStreamView);document.getElementById('streamZoomOut')?.addEventListener('click',()=>{const c=(rideStreamUI.viewStart+rideStreamUI.viewEnd)/2,span=Math.min(1,(rideStreamUI.viewEnd-rideStreamUI.viewStart)*1.6);setStreamWindow(c-span/2,c+span/2)});const svg=document.getElementById('rideStreamChart');if(!svg)return;svg.addEventListener('wheel',e=>{e.preventDefault();const r=svg.getBoundingClientRect(),anchor=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),span=rideStreamUI.viewEnd-rideStreamUI.viewStart,factor=e.deltaY<0?.78:1.28,newSpan=Math.max(.02,Math.min(1,span*factor)),world=rideStreamUI.viewStart+anchor*span;setStreamWindow(world-anchor*newSpan,world+(1-anchor)*newSpan)},{passive:false});svg.addEventListener('pointerdown',e=>{svg.setPointerCapture?.(e.pointerId);rideStreamUI.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(rideStreamUI.pointers.size===1)rideStreamUI.drag={x:e.clientX,start:rideStreamUI.viewStart,end:rideStreamUI.viewEnd};});svg.addEventListener('pointermove',e=>{if(rideStreamUI.pointers.has(e.pointerId))rideStreamUI.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const pts=[...rideStreamUI.pointers.values()];if(pts.length===2){const d=Math.abs(pts[0].x-pts[1].x),state=rideStreamUI.pinch;if(!state)rideStreamUI.pinch={d,span:rideStreamUI.viewEnd-rideStreamUI.viewStart,center:(rideStreamUI.viewStart+rideStreamUI.viewEnd)/2};else if(d>10){const newSpan=Math.max(.02,Math.min(1,state.span*state.d/d));setStreamWindow(state.center-newSpan/2,state.center+newSpan/2)}}else if(pts.length===1&&rideStreamUI.drag){const r=svg.getBoundingClientRect(),dx=(e.clientX-rideStreamUI.drag.x)/Math.max(1,r.width),span=rideStreamUI.drag.end-rideStreamUI.drag.start;setStreamWindow(rideStreamUI.drag.start-dx*span,rideStreamUI.drag.end-dx*span)}else{rideStreamUI.hoverIndex=streamIndexAtClientX(e.clientX);renderStreamChart();}});function endPointer(e){rideStreamUI.pointers.delete(e.pointerId);if(rideStreamUI.pointers.size<2)rideStreamUI.pinch=null;if(!rideStreamUI.pointers.size){rideStreamUI.drag=null;rideStreamUI.hoverIndex=streamIndexAtClientX(e.clientX);renderStreamChart();}}svg.addEventListener('pointerup',endPointer);svg.addEventListener('pointercancel',endPointer);svg.addEventListener('pointerleave',e=>{if(!rideStreamUI.pointers.size){rideStreamUI.hoverIndex=null;renderStreamChart();}});svg.addEventListener('dblclick',resetStreamView);svg.addEventListener('click',e=>{rideStreamUI.hoverIndex=streamIndexAtClientX(e.clientX);renderStreamChart();});}
+function renderRideZones(zones){ const el=document.getElementById('rideZoneDistribution'); if(!zones){el.innerHTML='<div class="notice">No power-zone analysis yet. Set an FTP in your athlete profile; recalculation of historical zone profiles follows in a later build.</div>';return;} el.innerHTML=Object.entries(zones).map(([z,v])=>`<div class="zone-bar-row"><strong>${z}</strong><div class="zone-bar"><span style="width:${Math.min(100,v.percent)}%"></span></div><span>${v.percent.toFixed(1)}%</span></div>`).join(''); }
+function formatNum(v,d=0,suffix=''){ return Number.isFinite(Number(v))?`${Number(v).toFixed(d)}${suffix}`:'—'; }
+function renderAdvancedAnalytics(ride,analytics){ const el=document.getElementById('rideAdvancedKpis'); if(!el)return; const ftp=Number(appState.athlete?.physiology?.ftp)||0; el.innerHTML=`<div><div class="metric-sm">${formatNum(ride.normalizedPower,0,' W')}</div><div class="label">Normalized Power</div></div><div><div class="metric-sm">${formatNum(ride.intensityFactor,2)}</div><div class="label">Intensity Factor${ftp?'':' · FTP required'}</div></div><div><div class="metric-sm">${formatNum(ride.trainingLoad,0)}</div><div class="label">Ride Load${ftp?'':' · FTP required'}</div></div><div><div class="metric-sm">${formatNum(analytics?.variabilityIndex,2)}</div><div class="label">Variability Index</div></div><div><div class="metric-sm">${formatNum(ride.workKJ,0,' kJ')}</div><div class="label">Mechanical work</div></div><div><div class="metric-sm">${formatNum(analytics?.efficiencyFactor,2)}</div><div class="label">Efficiency factor</div></div><div><div class="metric-sm">${formatNum(analytics?.aerobicDecoupling,1,' %')}</div><div class="label">Aerobic decoupling</div></div>`; const note=document.getElementById('rideAdvancedNote'); note.textContent=ftp?'FTP-dependent metrics use your currently stored FTP. Ride-specific zone-history will be added later.':'Set a valid FTP in Profile to enable Intensity Factor and Ride Load. NP, VI, work and decoupling can still be calculated from ride data.'; }
+function distributionMarkup(name,bins,unit){ if(!bins||!bins.length)return `<div class="notice">${name}: not enough data.</div>`; const max=Math.max(...bins.map(b=>b.percent),1); return `<div class="dist-block"><strong>${name}</strong>${bins.map(b=>`<div class="zone-bar-row"><span>${Math.round(b.from)}–${Math.round(b.to)} ${unit}</span><div class="zone-bar"><span style="width:${Math.max(2,b.percent/max*100)}%"></span></div><span>${b.percent.toFixed(0)}%</span></div>`).join('')}</div>`; }
+function renderDistributions(analytics){ const d=analytics?.distributions||{}; document.getElementById('rideDistributions').innerHTML=distributionMarkup('POWER',d.power,'W')+distributionMarkup('HEART RATE',d.heartRate,'bpm')+distributionMarkup('CADENCE',d.cadence,'rpm'); }
+function renderRideInsights(insights){ const el=document.getElementById('rideInsights'); if(!insights?.length){el.innerHTML='<div class="notice">No robust insight yet. RideLab only shows insights supported by available data.</div>';return;} el.innerHTML=insights.map(i=>`<div class="insight-item ${i.tone||''}"><strong>${i.title}</strong><p>${i.text}</p></div>`).join(''); }
+async function ensureAdvancedAnalytics(ride,stream,analytics){ const ftp=Number(appState.athlete?.physiology?.ftp)||0; const needs=!Number.isFinite(Number(ride.normalizedPower))||analytics?.distributions==null||analytics?.insights==null; if(!needs)return {ride,analytics}; const a=calcAdvancedAnalytics(ride,stream,ftp); Object.assign(ride,{normalizedPower:a.normalizedPower,trainingLoad:a.trainingLoad,intensityFactor:a.intensityFactor,workKJ:a.workKJ}); const next={...(analytics||{id:ride.id,rideId:ride.id}),efficiencyFactor:a.efficiencyFactor,aerobicDecoupling:a.aerobicDecoupling,variabilityIndex:a.variabilityIndex,distributions:a.distributions,powerDistribution:a.distributions.power,hrZones:analytics?.hrZones||null,cadenceDistribution:a.distributions.cadence,insights:generateRideInsights(ride,a)}; await dbPut('rides',ride); await dbPut('rideAnalytics',next); return {ride,analytics:next}; }
+async function openRideDetail(id){ let ride=await dbGet('rides',id),stream=await dbGet('rideStreams',id),analytics=await dbGet('rideAnalytics',id); if(!ride)return; ({ride,analytics}=await ensureAdvancedAnalytics(ride,stream,analytics)); appState.currentRide=ride; document.getElementById('rideLibraryView').classList.add('hidden'); document.getElementById('rideDetailView').classList.add('active'); document.getElementById('rideDetailTitle').textContent=formatRideDate(ride.date); document.getElementById('rideDetailSubtitle').textContent=`${ride.fileName} · ${ride.recordCount||0} FIT record points`;
+  document.getElementById('rideHeroKpis').innerHTML=`<article class="card"><div class="metric-sm">${formatDistance(ride.distanceM)}</div><div class="label">Distance</div></article><article class="card"><div class="metric-sm">${formatDuration(ride.durationSec)}</div><div class="label">Duration</div></article><article class="card"><div class="metric-sm">${metric(ride.elevationGainM,' m')}</div><div class="label">Elevation</div></article><article class="card"><div class="metric-sm">${metric(ride.avgPower,' W')}</div><div class="label">Avg power</div></article>`;
+  const q=ride.dataQuality||{}; document.getElementById('rideQuality').innerHTML=qualityMarkup('Power',q.power||0)+qualityMarkup('Heart rate',q.heartRate||0)+qualityMarkup('Cadence',q.cadence||0)+qualityMarkup('GPS',q.gps||0)+qualityMarkup('AXS',q.axs||0);
+  document.getElementById('rideSensors').innerHTML=sensorMarkup('POWER',ride.hasPower)+sensorMarkup('HEART RATE',ride.hasHR)+sensorMarkup('CADENCE',ride.hasCadence)+sensorMarkup('GPS',ride.hasGPS)+sensorMarkup('SRAM AXS',ride.hasAXS); rideStreamUI.stream=stream; rideStreamUI.viewStart=0; rideStreamUI.viewEnd=1; rideStreamUI.hoverIndex=null; document.querySelectorAll('#streamLegend [data-stream]').forEach(b=>{const k=b.dataset.stream,available=streamValues(k).some(v=>v!=null);b.disabled=!available;b.style.opacity=available?'1':'.35';rideStreamUI.active[k]=available&&(k==='power'||k==='heartRate'||k==='elevation');b.classList.toggle('active',rideStreamUI.active[k]);}); renderStreamChart(stream); renderAdvancedAnalytics(ride,analytics); renderDistributions(analytics); renderRideInsights(analytics?.insights||[]); renderRideZones(analytics?.powerZones||null);
+  const axs=analytics?.axsAnalytics||{}; document.getElementById('rideAxsTitle').textContent=axs.available?'SHIFT DATA DETECTED.':'NO SHIFT DATA DETECTED.'; document.getElementById('rideAxsContent').innerHTML=axs.available?`<div class="grid kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div><div class="metric-sm">${axs.totalShifts??'—'}</div><div class="label">Total shifts</div></div><div><div class="metric-sm">${axs.frontShifts??'—'}</div><div class="label">Front</div></div><div><div class="metric-sm">${axs.rearShifts??'—'}</div><div class="label">Rear</div></div></div><div class="axs-field-list section-gap">${(axs.fieldNames||[]).slice(0,20).map(f=>`<span class="pill">${f}</span>`).join('')||'<span class="muted">Gear/shift event data detected.</span>'}</div>`:'<p>RideLab found no gear or shift fields in this FIT file. The rest of the ride remains fully usable.</p>'; window.scrollTo({top:0,behavior:'instant'}); }
+function closeRideDetail(){ document.getElementById('rideDetailView').classList.remove('active'); document.getElementById('rideLibraryView').classList.remove('hidden'); appState.currentRide=null; window.scrollTo({top:0,behavior:'instant'}); }
+document.getElementById('backToRidesBtn').addEventListener('click',closeRideDetail);
+initRideStreamControls();
+function renderProgress(){ const rides=appState.rides||[],seconds=rides.reduce((s,r)=>s+(Number(r.durationSec)||0),0),dist=rides.reduce((s,r)=>s+(Number(r.distanceM)||0),0),elev=rides.reduce((s,r)=>s+(Number(r.elevationGainM)||0),0); document.getElementById('progressTime').textContent=rides.length?formatDuration(seconds):'—'; document.getElementById('progressDistance').textContent=rides.length?formatDistance(dist):'—'; document.getElementById('progressElevation').textContent=rides.length?`${Math.round(elev)} m`:'—'; document.getElementById('progressRides').textContent=rides.length; }
+
+
+/* =============================================================
+   11 · BACKUP / RESTORE · ALPHA.3
+   ============================================================= */
+async function makeBackup(){ const stores=['athlete','rides','rideStreams','rideAnalytics','dailyCheckins','rideFeedback','trainingPlans','workouts','nutritionProfiles','settings','appMeta']; const data={app:{name:APP.name,version:APP.version,schemaVersion:1,exportedAt:new Date().toISOString()}}; for(const s of stores)data[s]=await dbAll(s); return data; }
+document.getElementById('exportBackupBtn').addEventListener('click',async()=>{ const data=await makeBackup(); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`ridelab-backup-${new Date().toISOString().slice(0,10)}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); });
+document.getElementById('importBackupBtn').addEventListener('click',()=>document.getElementById('backupInput').click()); document.getElementById('backupInput').addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f)return; try{ const data=JSON.parse(await f.text()); if(data?.app?.schemaVersion!==1)throw new Error('Unsupported backup schema'); for(const s of ['athlete','rides','rideStreams','rideAnalytics','dailyCheckins','rideFeedback','trainingPlans','workouts','nutritionProfiles','settings','appMeta']){ if(Array.isArray(data[s])){ await dbClear(s); for(const obj of data[s])await dbPut(s,obj); } } appState.athlete=await dbGet('athlete','primary'); renderAthlete(); await refreshRideLibrary(); alert('RideLab backup restored.'); }catch(err){ alert('Backup could not be restored: '+err.message); } e.target.value=''; });
+
+/* =============================================================
+   12 · DATE / PLAN WEEK
+   ============================================================= */
+function updatePlanDate(){ const now=new Date(); const start=new Date((appState.athlete?.planStartDate||APP.planStartDate)+'T00:00:00'); const days=Math.max(0,Math.floor((now-start)/86400000)); const week=Math.min(12,Math.floor(days/7)+1); document.getElementById('todayEyebrow').textContent=`FOUNDATION · WEEK ${week} / 12`; document.getElementById('todayDate').textContent=new Intl.DateTimeFormat('de-DE',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}).format(now); }
+
+/* =============================================================
+   13 · APP INIT
+   ============================================================= */
+async function init(){ renderAppVersion(); applyTheme(getTheme()); if(!location.hash)history.replaceState(null,'','#today'); renderRoute(); calculateFuel(); try{ await openDatabase(); appState.athlete=await dbGet('athlete','primary'); renderAthlete(); updatePlanDate(); await refreshRideLibrary(); if(!appState.athlete)openOnboarding(false); }catch(err){ console.error(err); alert('RideLab could not open its local database. Private browsing or browser storage restrictions may be the cause.'); renderAthlete(); updatePlanDate(); } }
+init();
+</script>
+</body>
+</html>
